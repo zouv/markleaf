@@ -1,0 +1,35 @@
+[package]
+name = "markleaf"
+version = "0.1.0"  # 版本号唯一出处；tauri.conf.json 省略 version 会回退到这里
+description = "Fast, beautiful and convenient desktop Markdown reader and editor"
+edition = "2021"
+publish = false
+
+[lib]
+name = "markleaf_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+comrak = { version = "0.39", default-features = false }
+encoding_rs = "0.8"
+rfd = "0.15"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

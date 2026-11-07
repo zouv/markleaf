@@ -15,7 +15,9 @@ pub struct TocItem {
 #[serde(rename_all = "camelCase")]
 pub struct DocStats {
     pub chars: usize,
+    pub chars_with_spaces: usize,
     pub words: usize,
+    pub paragraphs: usize,
     pub lines: usize,
     pub reading_minutes: usize,
     pub tasks_total: usize,
@@ -88,15 +90,24 @@ pub fn slugify_heading(text: &str, line: usize) -> String {
     }
 }
 
-pub fn compute_stats(markdown: &str, tasks_total: usize, tasks_done: usize) -> DocStats {
+pub fn compute_stats(
+    markdown: &str,
+    paragraphs: usize,
+    tasks_total: usize,
+    tasks_done: usize,
+) -> DocStats {
     let lines = if markdown.is_empty() {
         1
     } else {
         markdown.lines().count().max(1)
     };
     let mut chars = 0usize;
+    let mut chars_with_spaces = 0usize;
     let mut cjk_chars = 0usize;
     for ch in markdown.chars() {
+        if ch != '\r' && ch != '\n' {
+            chars_with_spaces += 1;
+        }
         if !ch.is_whitespace() {
             chars += 1;
             if ('\u{4E00}'..='\u{9FFF}').contains(&ch) {
@@ -112,7 +123,9 @@ pub fn compute_stats(markdown: &str, tasks_total: usize, tasks_done: usize) -> D
     let reading_minutes = (words.div_ceil(320)).max(1);
     DocStats {
         chars,
+        chars_with_spaces,
         words,
+        paragraphs: paragraphs.max(usize::from(chars > 0)),
         lines,
         reading_minutes,
         tasks_total,
@@ -120,17 +133,27 @@ pub fn compute_stats(markdown: &str, tasks_total: usize, tasks_done: usize) -> D
     }
 }
 
-/// 将非代码块内的 `==高亮文本==` 转换为 `<mark class="ml-highlight">高亮文本</mark>`，并给标题和代码块增强属性。
+/// 将非代码块内的 `==高亮文本==` 转换为 `<mark class="ml-highlight">高亮文本</mark>`，并给标题注入 id 与锚点按钮。
 fn post_process_html(raw_html: &str, toc: &[TocItem]) -> String {
     let mut html = raw_html.to_string();
 
-    // 1. 为带有 data-sourcepos 的 <h1..h6> 注入 id，方便大纲精准平滑滚动
+    // 1. 为带有 data-sourcepos 的 <h1..h6> 注入 id 与悬停锚点按钮
     for item in toc {
         let needle_prefix = format!("<h{} data-sourcepos=\"{}:", item.level, item.line);
         if let Some(pos) = html.find(&needle_prefix) {
             let insert_at = pos + 3; // `<hN` 之后
             let id_attr = format!(" id=\"{}\"", item.id);
             html.insert_str(insert_at, &id_attr);
+
+            let close_tag = format!("</h{}>", item.level);
+            if let Some(close_rel) = html[pos..].find(&close_tag) {
+                let close_pos = pos + close_rel;
+                let anchor_btn = format!(
+                    "<button type=\"button\" class=\"ml-heading-anchor\" data-anchor=\"#{}\" title=\"复制标题锚点 #{}\">#</button>",
+                    item.id, item.id
+                );
+                html.insert_str(close_pos, &anchor_btn);
+            }
         }
     }
 
@@ -213,6 +236,7 @@ pub fn render_markdown_payload(markdown: &str) -> RenderedMarkdown {
     let root = parse_document(&arena, markdown, &options);
 
     let mut toc = Vec::new();
+    let mut paragraphs = 0usize;
     let mut tasks_total = 0usize;
     let mut tasks_done = 0usize;
 
@@ -236,6 +260,9 @@ pub fn render_markdown_payload(markdown: &str) -> RenderedMarkdown {
                     });
                 }
             }
+            NodeValue::Paragraph => {
+                paragraphs += 1;
+            }
             NodeValue::TaskItem(symbol) => {
                 tasks_total += 1;
                 if symbol.is_some() {
@@ -251,7 +278,7 @@ pub fn render_markdown_payload(markdown: &str) -> RenderedMarkdown {
     let raw_html = String::from_utf8_lossy(&raw_buf);
 
     let html = post_process_html(&raw_html, &toc);
-    let stats = compute_stats(markdown, tasks_total, tasks_done);
+    let stats = compute_stats(markdown, paragraphs, tasks_total, tasks_done);
 
     RenderedMarkdown { html, toc, stats }
 }
@@ -323,12 +350,15 @@ mod tests {
         assert_eq!(res.toc[0].line, 1);
         assert!(res.html.contains("data-sourcepos=\"1:1-1:"));
         assert!(res.html.contains(&res.toc[0].id));
+        assert!(res.html.contains("ml-heading-anchor"));
         assert!(res
             .html
             .contains("<mark class=\"ml-highlight\">重点高亮</mark>"));
         assert!(res.html.contains("markdown-alert-tip"));
         assert_eq!(res.stats.tasks_total, 2);
         assert_eq!(res.stats.tasks_done, 1);
+        assert!(res.stats.paragraphs >= 1);
+        assert!(res.stats.chars_with_spaces >= res.stats.chars);
     }
 
     #[test]

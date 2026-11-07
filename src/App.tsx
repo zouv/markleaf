@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getAppInfo,
   getStartupDocument,
@@ -8,576 +8,1171 @@ import {
   saveMarkdownDialog,
   saveMarkdownFile,
   toggleMarkdownTask,
-  type AppInfo,
   type DocStats,
   type DocumentSession,
   type SiblingFile,
   type TocItem,
 } from './api';
+import SettingsDialog from './components/SettingsDialog';
+import TitleBar, { type DocTabSummary } from './components/TitleBar';
 import { DEMO_MARKDOWN } from './demoDoc';
+import {
+  FONT_PRESET_MAP,
+  loadSettings,
+  normalizeContentForSave,
+  PAGE_WIDTH_MAP,
+  saveSettings,
+  THEME_OPTIONS,
+  type AppSettings,
+  type PageWidthMode,
+  type StatsUnit,
+  type ThemeId,
+  type ViewMode,
+} from './settings';
+import Icon from './ui/Icon';
 
-export type ViewMode = 'read' | 'split' | 'edit';
-export type ThemeMode = 'paper' | 'github' | 'sepia' | 'night';
-
-const THEME_OPTIONS: { id: ThemeMode; label: string; badge: string }[] = [
-  { id: 'paper', label: '书页 Paper', badge: '暖白' },
-  { id: 'github', label: 'GitHub', badge: '纯净' },
-  { id: 'sepia', label: '羊皮纸 Sepia', badge: '护眼' },
-  { id: 'night', label: '暗夜 Night', badge: '深色' },
-];
-
-function extractStartLine(sourcepos: string | null): number | null {
-  if (!sourcepos) return null;
-  const firstPart = sourcepos.split('-')[0];
-  const lineStr = firstPart?.split(':')[0];
-  const parsed = Number.parseInt(lineStr ?? '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+interface DocTabState {
+  id: string;
+  filePath: string | null;
+  fileName: string;
+  dirPath: string;
+  encoding: string;
+  content: string;
+  savedContent: string;
+  html: string;
+  toc: TocItem[];
+  stats: DocStats;
+  siblings: SiblingFile[];
+  activeLine: number;
 }
 
-/** 为代码块注入语言头部栏与一键复制按钮，并做轻量关键词着色 */
-function enhanceRenderedDom(container: HTMLElement | null, searchQuery: string) {
-  if (!container) return;
+const OPEN_PATHS_STORAGE_KEY = 'markleaf.openPaths.v1';
 
-  const pres = container.querySelectorAll('pre');
-  pres.forEach((pre) => {
-    if (pre.querySelector('.ml-code-header')) return;
-    const codeEl = pre.querySelector('code');
-    const className = codeEl?.className ?? '';
-    const langMatch = className.match(/language-([a-zA-Z0-9_-]+)/);
-    const lang = (langMatch?.[1] ?? 'text').toUpperCase();
+const EMPTY_STATS: DocStats = {
+  chars: 0,
+  charsWithSpaces: 0,
+  words: 0,
+  paragraphs: 1,
+  lines: 1,
+  readingMinutes: 1,
+  tasksTotal: 0,
+  tasksDone: 0,
+};
 
-    const header = document.createElement('div');
-    header.className = 'ml-code-header';
-
-    const langBadge = document.createElement('span');
-    langBadge.className = 'ml-code-lang';
-    langBadge.textContent = lang;
-
-    const copyBtn = document.createElement('button');
-    copyBtn.type = 'button';
-    copyBtn.className = 'ml-code-copy';
-    copyBtn.textContent = '复制代码';
-
-    header.appendChild(langBadge);
-    header.appendChild(copyBtn);
-    pre.insertBefore(header, pre.firstChild);
-  });
-
-  // 为每个块级带 data-sourcepos 的元素添加悬停行号提示属性
-  const blocks = container.querySelectorAll<HTMLElement>('[data-sourcepos]');
-  blocks.forEach((block) => {
-    const startLine = extractStartLine(block.getAttribute('data-sourcepos'));
-    if (startLine) {
-      block.setAttribute('data-line-number', String(startLine));
-    }
-  });
-
-  // 搜索词高亮提示
-  container.querySelectorAll('.ml-search-hit').forEach((el) => {
-    el.classList.remove('ml-search-hit');
-  });
-  const q = searchQuery.trim().toLowerCase();
-  if (q.length >= 2) {
-    blocks.forEach((block) => {
-      if ((block.textContent ?? '').toLowerCase().includes(q)) {
-        block.classList.add('ml-search-hit');
-      }
-    });
-  }
+let tabCounter = 1;
+function createTabId(): string {
+  tabCounter += 1;
+  return `tab-${Date.now()}-${tabCounter}`;
 }
 
-export default function App() {
-  const [appInfo, setAppInfo] = useState<AppInfo>({ name: 'MarkLeaf', version: '0.1.0' });
-  const [filePath, setFilePath] = useState<string | null>(null);
-  const [fileName, setFileName] = useState<string>('欢迎使用 MarkLeaf.md');
-  const [dirPath, setDirPath] = useState<string>('');
-  const [encoding, setEncoding] = useState<string>('UTF-8');
-  const [content, setContent] = useState<string>(DEMO_MARKDOWN);
-  const [savedContent, setSavedContent] = useState<string>(DEMO_MARKDOWN);
-  const [html, setHtml] = useState<string>('');
-  const [toc, setToc] = useState<TocItem[]>([]);
-  const [stats, setStats] = useState<DocStats>({
-    chars: 0,
-    words: 0,
-    lines: 1,
-    readingMinutes: 1,
-    tasksTotal: 0,
-    tasksDone: 0,
-  });
-  const [siblings, setSiblings] = useState<SiblingFile[]>([]);
-  const [siblingFilter, setSiblingFilter] = useState<string>('');
+const PAIR_MAP: Record<string, string> = {
+  '(': ')',
+  '[': ']',
+  '{': '}',
+  '"': '"',
+  "'": "'",
+  '*': '*',
+  '`': '`',
+  '=': '=',
+  '~': '~',
+};
 
-  const [viewMode, setViewMode] = useState<ViewMode>('read');
-  const [theme, setTheme] = useState<ThemeMode>('paper');
-  const [fontSize, setFontSize] = useState<number>(16);
-  const [showLeftSidebar, setShowLeftSidebar] = useState<boolean>(true);
-  const [showRightOutline, setShowRightOutline] = useState<boolean>(true);
+export function App() {
+  const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
+  const [systemDark, setSystemDark] = useState<boolean>(() =>
+    typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(prefers-color-scheme: dark)').matches
+      : false,
+  );
+  const [appVersion, setAppVersion] = useState<string>('0.2.0');
+
+  // 视图与面板状态
+  const [viewMode, setViewMode] = useState<ViewMode>(() => loadSettings().defaultViewMode);
+  const [leftOpen, setLeftOpen] = useState<boolean>(() => loadSettings().defaultLeftSidebar);
+  const [rightOpen, setRightOpen] = useState<boolean>(() => loadSettings().defaultRightSidebar);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+
+  // 多页签状态
+  const [tabs, setTabs] = useState<DocTabState[]>(() => [
+    {
+      id: 'tab-welcome',
+      filePath: null,
+      fileName: '欢迎使用 MarkLeaf.md',
+      dirPath: '',
+      encoding: 'UTF-8',
+      content: DEMO_MARKDOWN,
+      savedContent: DEMO_MARKDOWN,
+      html: '',
+      toc: [],
+      stats: EMPTY_STATS,
+      siblings: [],
+      activeLine: 1,
+    },
+  ]);
+  const [activeTabId, setActiveTabId] = useState<string>('tab-welcome');
+
+  // 搜索、过滤器与弹出菜单状态
+  const [fileFilter, setFileFilter] = useState<string>('');
   const [searchOpen, setSearchOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [activeLine, setActiveLine] = useState<number>(1);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [copyMenuOpen, setCopyMenuOpen] = useState<boolean>(false);
+  const [tablePickerOpen, setTablePickerOpen] = useState<boolean>(false);
+  const [tableHover, setTableHover] = useState<{ rows: number; cols: number }>({ rows: 3, cols: 4 });
+  const [alertMenuOpen, setAlertMenuOpen] = useState<boolean>(false);
+  const [statsHover, setStatsHover] = useState<boolean>(false);
 
-  const proseRef = useRef<HTMLDivElement | null>(null);
+  // 内置图片灯箱状态
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string; scale: number } | null>(null);
+
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const gutterRef = useRef<HTMLDivElement | null>(null);
+  const readerRef = useRef<HTMLElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
-  const isDirty = content !== savedContent;
+  const activeTab = useMemo(
+    () => tabs.find((t) => t.id === activeTabId) ?? tabs[0],
+    [tabs, activeTabId],
+  );
+
+  const isDirty = activeTab ? activeTab.content !== activeTab.savedContent : false;
 
   const showToast = useCallback((msg: string) => {
-    setToastMessage(msg);
+    setToast(msg);
     if (toastTimerRef.current) {
       window.clearTimeout(toastTimerRef.current);
     }
     toastTimerRef.current = window.setTimeout(() => {
-      setToastMessage(null);
+      setToast(null);
     }, 2400);
   }, []);
 
-  const applyDocumentSession = useCallback((session: DocumentSession) => {
-    setFilePath(session.path);
-    setFileName(session.fileName);
-    setDirPath(session.dirPath);
-    setEncoding(session.encoding);
-    setContent(session.content);
-    setSavedContent(session.content);
-    setHtml(session.html);
-    setToc(session.toc);
-    setStats(session.stats);
-    setSiblings(session.siblings);
-    setActiveLine(1);
+  // 监听操作系统亮暗模式变化
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
   }, []);
 
-  // 启动时初始化：读取 app_info + 检查是否有双击传入的 CLI Markdown 文件
-  const initStartupDocument = useCallback(async () => {
-    try {
-      const info = await getAppInfo();
-      setAppInfo(info);
-    } catch {
-      // 忽略预览环境错误
+  const effectiveTheme: ThemeId = useMemo(() => {
+    if (settings.followSystemTheme) {
+      return systemDark ? settings.darkTheme : settings.lightTheme;
     }
+    return settings.theme;
+  }, [settings.followSystemTheme, settings.darkTheme, settings.lightTheme, settings.theme, systemDark]);
 
+  // 同步主题与全局样式属性到 document.documentElement
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', effectiveTheme);
+    document.documentElement.setAttribute(
+      'data-hide-scrollbar',
+      settings.hideScrollbar ? 'true' : 'false',
+    );
+  }, [effectiveTheme, settings.hideScrollbar]);
+
+  const updateSettings = useCallback((next: AppSettings) => {
+    setSettings(next);
+    saveSettings(next);
+  }, []);
+
+  const updateTabById = useCallback((tabId: string, updater: (prev: DocTabState) => DocTabState) => {
+    setTabs((prev) => prev.map((t) => (t.id === tabId ? updater(t) : t)));
+  }, []);
+
+  const sessionToTabState = useCallback((session: DocumentSession, existingId?: string): DocTabState => {
+    return {
+      id: existingId ?? createTabId(),
+      filePath: session.path,
+      fileName: session.fileName,
+      dirPath: session.dirPath,
+      encoding: session.encoding,
+      content: session.content,
+      savedContent: session.content,
+      html: session.html,
+      toc: session.toc,
+      stats: session.stats,
+      siblings: session.siblings,
+      activeLine: 1,
+    };
+  }, []);
+
+  // 初始化：读取应用版本、CLI 双击打开的文档或上次打开的文档列表，并渲染初始欢迎页
+  useEffect(() => {
+    let cancelled = false;
+    async function bootstrap() {
+      try {
+        const info = await getAppInfo();
+        if (!cancelled && info?.version) {
+          setAppVersion(info.version);
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        const startup = await getStartupDocument();
+        if (!cancelled && startup) {
+          const newTab = sessionToTabState(startup, 'tab-startup');
+          setTabs([newTab]);
+          setActiveTabId(newTab.id);
+          return;
+        }
+      } catch {
+        // fallback to welcome tab
+      }
+
+      const rendered = await renderMarkdown(DEMO_MARKDOWN);
+      if (!cancelled) {
+        updateTabById('tab-welcome', (prev) => ({
+          ...prev,
+          html: rendered.html,
+          toc: rendered.toc,
+          stats: rendered.stats,
+        }));
+      }
+    }
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionToTabState, updateTabById]);
+
+  // 持久化已打开的磁盘文件路径列表
+  useEffect(() => {
     try {
-      const startupSession = await getStartupDocument();
-      if (startupSession) {
-        applyDocumentSession(startupSession);
-        showToast(`已秒开：${startupSession.fileName}`);
+      const paths = tabs.map((t) => t.filePath).filter((p): p is string => Boolean(p));
+      localStorage.setItem(OPEN_PATHS_STORAGE_KEY, JSON.stringify(paths));
+    } catch {
+      // ignore
+    }
+  }, [tabs]);
+
+  // 当当前活跃页签的 content 变化时，防抖调用 Rust 引擎重绘 HTML、TOC 与字数统计
+  useEffect(() => {
+    if (!activeTab) return;
+    let cancelled = false;
+    const currentId = activeTab.id;
+    const currentContent = activeTab.content;
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await renderMarkdown(currentContent);
+        if (!cancelled) {
+          updateTabById(currentId, (prev) => ({
+            ...prev,
+            html: res.html,
+            toc: res.toc,
+            stats: res.stats,
+          }));
+        }
+      } catch (err) {
+        console.error('renderMarkdown failed:', err);
+      }
+    }, 35);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeTab?.id, activeTab?.content, updateTabById]);
+
+  // 自动保存（移植自 MarkText：仅对已有落盘路径且有未保存修改的页签触发）
+  useEffect(() => {
+    if (!settings.autoSave || !activeTab || !activeTab.filePath) return;
+    if (activeTab.content === activeTab.savedContent) return;
+
+    const targetId = activeTab.id;
+    const targetPath = activeTab.filePath;
+    const targetEncoding = activeTab.encoding;
+    const rawContent = activeTab.content;
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const normalized = normalizeContentForSave(
+          rawContent,
+          settings.trailingNewline,
+          settings.endOfLine,
+        );
+        const session = await saveMarkdownFile(targetPath, normalized, targetEncoding);
+        updateTabById(targetId, (prev) => ({
+          ...prev,
+          content: session.content,
+          savedContent: session.content,
+          encoding: session.encoding,
+          html: session.html,
+          toc: session.toc,
+          stats: session.stats,
+          siblings: session.siblings,
+        }));
+        showToast(`已自动保存 ${session.fileName}`);
+      } catch {
+        // ignore auto-save error
+      }
+    }, settings.autoSaveDelay);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    settings.autoSave,
+    settings.autoSaveDelay,
+    settings.trailingNewline,
+    settings.endOfLine,
+    activeTab,
+    updateTabById,
+    showToast,
+  ]);
+
+  // 为渲染区代码块挂载头部工具栏（语言角标 + 一键复制按钮）以及按设置包裹代码行号
+  useEffect(() => {
+    const container = readerRef.current;
+    if (!container) return;
+
+    const preNodes = container.querySelectorAll<HTMLPreElement>('pre');
+    preNodes.forEach((pre) => {
+      if (!pre.querySelector('.ml-code-header')) {
+        const codeEl = pre.querySelector('code');
+        const langClass = codeEl?.className ?? '';
+        const match = langClass.match(/language-([\w+-]+)/);
+        const lang = match ? match[1].toUpperCase() : 'TEXT';
+
+        // 为代码块构建逐行容器，以便支持行号显示与折行控制
+        if (codeEl && !codeEl.hasAttribute('data-lines-enhanced')) {
+          const rawText = codeEl.textContent ?? '';
+          const trimmed = rawText.replace(/\n$/, '');
+          const lines = trimmed.split('\n');
+          codeEl.setAttribute('data-raw-code', trimmed);
+          codeEl.setAttribute('data-lines-enhanced', 'true');
+          codeEl.innerHTML = lines
+            .map((lineText, idx) => {
+              const escaped = lineText
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+              return `<span class="ml-code-line" data-ln="${idx + 1}">${escaped || ' '}</span>`;
+            })
+            .join('\n');
+        }
+
+        const header = document.createElement('div');
+        header.className = 'ml-code-header';
+
+        const langBadge = document.createElement('span');
+        langBadge.className = 'ml-code-lang';
+        langBadge.textContent = lang;
+
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'ml-code-copy';
+        copyBtn.textContent = '复制代码';
+        copyBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const text = codeEl?.getAttribute('data-raw-code') ?? codeEl?.textContent ?? '';
+          void navigator.clipboard.writeText(text).then(() => {
+            copyBtn.textContent = '✓ 已复制';
+            window.setTimeout(() => {
+              copyBtn.textContent = '复制代码';
+            }, 1500);
+          });
+        });
+
+        header.appendChild(langBadge);
+        header.appendChild(copyBtn);
+        pre.insertBefore(header, pre.firstChild);
+      }
+    });
+
+    // 为所有带 data-sourcepos 的元素标注起始行号（供 CSS 悬停提示与专注模式高亮）
+    const posElements = container.querySelectorAll<HTMLElement>('[data-sourcepos]');
+    posElements.forEach((el) => {
+      const raw = el.getAttribute('data-sourcepos') ?? '';
+      const startLine = parseInt(raw.split(':')[0] ?? '0', 10);
+      if (startLine > 0) {
+        el.setAttribute('data-line-number', String(startLine));
+      }
+      if (settings.focusMode && activeTab) {
+        const parts = raw.split('-');
+        const endLine = parseInt((parts[1] ?? parts[0] ?? '0').split(':')[0] ?? '0', 10);
+        const isFocused = activeTab.activeLine >= startLine && activeTab.activeLine <= Math.max(startLine, endLine);
+        el.classList.toggle('is-focus-block', isFocused);
+      } else {
+        el.classList.remove('is-focus-block');
+      }
+    });
+  }, [activeTab?.html, activeTab?.activeLine, settings.focusMode, viewMode]);
+
+  // 页内搜索高亮
+  useEffect(() => {
+    const container = readerRef.current;
+    if (!container) return;
+    const blocks = container.querySelectorAll<HTMLElement>('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote');
+    const q = searchQuery.trim().toLowerCase();
+    let firstMatch: HTMLElement | null = null;
+    blocks.forEach((el) => {
+      if (q && (el.textContent ?? '').toLowerCase().includes(q)) {
+        el.classList.add('ml-search-hit');
+        if (!firstMatch) firstMatch = el;
+      } else {
+        el.classList.remove('ml-search-hit');
+      }
+    });
+    if (firstMatch) {
+      (firstMatch as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [searchQuery, activeTab?.html]);
+
+  // 关闭外部下拉菜单
+  useEffect(() => {
+    if (!copyMenuOpen && !tablePickerOpen && !alertMenuOpen) return;
+    const closeAll = () => {
+      setCopyMenuOpen(false);
+      setTablePickerOpen(false);
+      setAlertMenuOpen(false);
+    };
+    window.addEventListener('mousedown', closeAll);
+    return () => window.removeEventListener('mousedown', closeAll);
+  }, [copyMenuOpen, tablePickerOpen, alertMenuOpen]);
+
+  // ============================================================================
+  // 多页签与文件操作
+  // ============================================================================
+  const handleNewTab = useCallback(
+    async (afterTabId?: string) => {
+      const untitledNum = tabs.filter((t) => !t.filePath).length + 1;
+      const initialMd = `# 未命名文档 ${untitledNum}\n\n在此开始编写 Markdown…\n`;
+      const rendered = await renderMarkdown(initialMd);
+      const newTab: DocTabState = {
+        id: createTabId(),
+        filePath: null,
+        fileName: `未命名-${untitledNum}.md`,
+        dirPath: activeTab?.dirPath ?? '',
+        encoding: 'UTF-8',
+        content: initialMd,
+        savedContent: initialMd,
+        html: rendered.html,
+        toc: rendered.toc,
+        stats: rendered.stats,
+        siblings: activeTab?.siblings ?? [],
+        activeLine: 3,
+      };
+      setTabs((prev) => {
+        if (!afterTabId) return [...prev, newTab];
+        const idx = prev.findIndex((t) => t.id === afterTabId);
+        if (idx === -1) return [...prev, newTab];
+        const next = [...prev];
+        next.splice(idx + 1, 0, newTab);
+        return next;
+      });
+      setActiveTabId(newTab.id);
+      if (viewMode === 'read') {
+        setViewMode('split');
+      }
+    },
+    [tabs, activeTab, viewMode],
+  );
+
+  const openPathInTab = useCallback(
+    async (path: string) => {
+      const existing = tabs.find((t) => t.filePath && t.filePath.toLowerCase() === path.toLowerCase());
+      if (existing) {
+        setActiveTabId(existing.id);
         return;
+      }
+      try {
+        const session = await openMarkdownFile(path);
+        const newTab = sessionToTabState(session);
+        setTabs((prev) => {
+          if (
+            prev.length === 1 &&
+            prev[0].id === 'tab-welcome' &&
+            prev[0].content === prev[0].savedContent
+          ) {
+            return [newTab];
+          }
+          return [...prev, newTab];
+        });
+        setActiveTabId(newTab.id);
+        showToast(`已打开 ${session.fileName} (${session.encoding})`);
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [tabs, sessionToTabState, showToast],
+  );
+
+  const handlePickFile = useCallback(async () => {
+    try {
+      const session = await pickMarkdownFile();
+      if (!session) return;
+      const existing = tabs.find(
+        (t) => t.filePath && t.filePath.toLowerCase() === session.path.toLowerCase(),
+      );
+      if (existing) {
+        setActiveTabId(existing.id);
+        return;
+      }
+      const newTab = sessionToTabState(session);
+      setTabs((prev) => {
+        if (
+          prev.length === 1 &&
+          prev[0].id === 'tab-welcome' &&
+          prev[0].content === prev[0].savedContent
+        ) {
+          return [newTab];
+        }
+        return [...prev, newTab];
+      });
+      setActiveTabId(newTab.id);
+      showToast(`已打开 ${session.fileName} (${session.encoding})`);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err));
+    }
+  }, [tabs, sessionToTabState, showToast]);
+
+  const handleSave = useCallback(async () => {
+    if (!activeTab) return;
+    try {
+      const normalized = normalizeContentForSave(
+        activeTab.content,
+        settings.trailingNewline,
+        settings.endOfLine,
+      );
+      if (activeTab.filePath) {
+        const session = await saveMarkdownFile(activeTab.filePath, normalized, activeTab.encoding);
+        updateTabById(activeTab.id, (prev) => ({
+          ...prev,
+          content: session.content,
+          savedContent: session.content,
+          encoding: session.encoding,
+          html: session.html,
+          toc: session.toc,
+          stats: session.stats,
+          siblings: session.siblings,
+        }));
+        showToast(`已保存 ${session.fileName} (${session.encoding})`);
+      } else {
+        const session = await saveMarkdownDialog(activeTab.fileName, normalized);
+        if (session) {
+          updateTabById(activeTab.id, () => sessionToTabState(session, activeTab.id));
+          showToast(`已另存为 ${session.fileName}`);
+        }
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err));
     }
+  }, [activeTab, settings.trailingNewline, settings.endOfLine, updateTabById, sessionToTabState, showToast]);
 
-    const rendered = await renderMarkdown(DEMO_MARKDOWN);
-    setHtml(rendered.html);
-    setToc(rendered.toc);
-    setStats(rendered.stats);
-  }, [applyDocumentSession, showToast]);
-
-  useEffect(() => {
-    void initStartupDocument();
-  }, [initStartupDocument]);
-
-  // 当 html 或搜索词变化时，增强代码块头部与行号标记
-  useEffect(() => {
-    enhanceRenderedDom(proseRef.current, searchQuery);
-  }, [html, searchQuery, viewMode]);
-
-  // 编辑态下内容变化时，极速实时重新渲染 HTML 与 TOC
-  const updateMarkdownContent = useCallback(async (nextContent: string) => {
-    setContent(nextContent);
+  const handleSaveAs = useCallback(async () => {
+    if (!activeTab) return;
     try {
-      const rendered = await renderMarkdown(nextContent);
-      setHtml(rendered.html);
-      setToc(rendered.toc);
-      setStats(rendered.stats);
-    } catch {
-      // 忽略单次渲染异常
-    }
-  }, []);
-
-  // 定位编辑器光标到指定 1-based 行号并居中滚动
-  const jumpEditorToLine = useCallback((targetLine: number) => {
-    setActiveLine(targetLine);
-    window.requestAnimationFrame(() => {
-      const textarea = editorRef.current;
-      if (!textarea) return;
-      const lines = textarea.value.split('\n');
-      const clampedLine = Math.max(1, Math.min(targetLine, lines.length));
-      let charOffset = 0;
-      for (let i = 0; i < clampedLine - 1; i++) {
-        charOffset += lines[i].length + 1;
+      const normalized = normalizeContentForSave(
+        activeTab.content,
+        settings.trailingNewline,
+        settings.endOfLine,
+      );
+      const session = await saveMarkdownDialog(activeTab.fileName, normalized);
+      if (session) {
+        updateTabById(activeTab.id, () => sessionToTabState(session, activeTab.id));
+        showToast(`已另存为 ${session.fileName}`);
       }
-      const lineLength = lines[clampedLine - 1]?.length ?? 0;
-      textarea.focus();
-      textarea.setSelectionRange(charOffset, charOffset + lineLength);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err));
+    }
+  }, [activeTab, settings.trailingNewline, settings.endOfLine, updateTabById, sessionToTabState, showToast]);
 
-      const lineHeight = 24;
-      const targetScroll = Math.max(0, (clampedLine - 5) * lineHeight);
-      textarea.scrollTop = targetScroll;
+  const handleCloseTab = useCallback(
+    (tabId: string) => {
+      const target = tabs.find((t) => t.id === tabId);
+      if (!target) return;
+      if (target.content !== target.savedContent) {
+        const ok = window.confirm(`文档「${target.fileName}」有未保存的修改，确定关闭该页签吗？`);
+        if (!ok) return;
+      }
+      if (tabs.length === 1) {
+        void renderMarkdown(DEMO_MARKDOWN).then((rendered) => {
+          const fallback: DocTabState = {
+            id: createTabId(),
+            filePath: null,
+            fileName: '欢迎使用 MarkLeaf.md',
+            dirPath: '',
+            encoding: 'UTF-8',
+            content: DEMO_MARKDOWN,
+            savedContent: DEMO_MARKDOWN,
+            html: rendered.html,
+            toc: rendered.toc,
+            stats: rendered.stats,
+            siblings: [],
+            activeLine: 1,
+          };
+          setTabs([fallback]);
+          setActiveTabId(fallback.id);
+        });
+        return;
+      }
+      const idx = tabs.findIndex((t) => t.id === tabId);
+      const nextTabs = tabs.filter((t) => t.id !== tabId);
+      setTabs(nextTabs);
+      if (activeTabId === tabId) {
+        const nextActive = nextTabs[Math.min(idx, nextTabs.length - 1)];
+        if (nextActive) setActiveTabId(nextActive.id);
+      }
+    },
+    [tabs, activeTabId],
+  );
+
+  const handleCloseOtherTabs = useCallback(
+    (keepId: string) => {
+      const keep = tabs.find((t) => t.id === keepId);
+      if (!keep) return;
+      setTabs([keep]);
+      setActiveTabId(keep.id);
+    },
+    [tabs],
+  );
+
+  const handleCloseTabsToRight = useCallback(
+    (tabId: string) => {
+      const idx = tabs.findIndex((t) => t.id === tabId);
+      if (idx === -1) return;
+      const nextTabs = tabs.slice(0, idx + 1);
+      setTabs(nextTabs);
+      if (!nextTabs.some((t) => t.id === activeTabId)) {
+        setActiveTabId(tabId);
+      }
+    },
+    [tabs, activeTabId],
+  );
+
+  const handleReorderTabs = useCallback((fromIndex: number, toIndex: number) => {
+    setTabs((prev) => {
+      if (fromIndex < 0 || fromIndex >= prev.length || toIndex < 0 || toIndex >= prev.length) {
+        return prev;
+      }
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
     });
   }, []);
 
-  // 阅读态双击任意段落 -> 自动切入分屏/编辑态并落焦到对应源码行
-  const handleProseDoubleClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'BUTTON' || target.tagName === 'A') {
-        return;
+  // ============================================================================
+  // 多格式剪贴板复制（移植自 MarkText：富文本 / HTML / Markdown）
+  // ============================================================================
+  const handleCopyRichText = useCallback(async () => {
+    if (!activeTab) return;
+    try {
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        const htmlBlob = new Blob([activeTab.html], { type: 'text/html' });
+        const textBlob = new Blob([activeTab.content], { type: 'text/plain' });
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'text/html': htmlBlob,
+            'text/plain': textBlob,
+          }),
+        ]);
+        showToast('已复制为富文本（可直接粘贴至 Word / 飞书 / Notion）');
+      } else {
+        await navigator.clipboard.writeText(activeTab.html);
+        showToast('已复制渲染 HTML');
       }
-      const sourceBlock = target.closest<HTMLElement>('[data-sourcepos]');
-      const line = extractStartLine(sourceBlock?.getAttribute('data-sourcepos') ?? null) ?? 1;
-      setViewMode((prev) => (prev === 'read' ? 'split' : prev));
-      jumpEditorToLine(line);
-      showToast(`已定位到第 ${line} 行进入便捷编辑`);
+    } catch {
+      await navigator.clipboard.writeText(activeTab.content);
+      showToast('已复制文档内容');
+    }
+  }, [activeTab, showToast]);
+
+  const handleCopyHtml = useCallback(async () => {
+    if (!activeTab) return;
+    await navigator.clipboard.writeText(activeTab.html);
+    showToast('已复制 HTML 源码到剪贴板');
+  }, [activeTab, showToast]);
+
+  const handleCopyMarkdown = useCallback(async () => {
+    if (!activeTab) return;
+    await navigator.clipboard.writeText(activeTab.content);
+    showToast('已复制 Markdown 源码到剪贴板');
+  }, [activeTab, showToast]);
+
+  // ============================================================================
+  // 编辑器定位、打字机滚动、行号水槽与自动配对
+  // ============================================================================
+  const jumpEditorToLine = useCallback(
+    (lineNumber: number) => {
+      if (!activeTab) return;
+      const targetMode: ViewMode = viewMode === 'read' ? 'split' : viewMode;
+      setViewMode(targetMode);
+      updateTabById(activeTab.id, (prev) => ({ ...prev, activeLine: lineNumber }));
+
+      window.requestAnimationFrame(() => {
+        const ta = editorRef.current;
+        if (!ta) return;
+        const lines = activeTab.content.split('\n');
+        const clampedLine = Math.max(1, Math.min(lineNumber, lines.length));
+        let charOffset = 0;
+        for (let i = 0; i < clampedLine - 1; i++) {
+          charOffset += lines[i].length + 1;
+        }
+        const lineEndOffset = charOffset + (lines[clampedLine - 1]?.length ?? 0);
+        ta.focus();
+        ta.setSelectionRange(charOffset, lineEndOffset);
+
+        const lineHeightPx = Math.round(settings.editorFontSize * settings.editorLineHeight);
+        ta.scrollTop = Math.max(0, (clampedLine - 5) * lineHeightPx);
+        if (gutterRef.current) {
+          gutterRef.current.scrollTop = ta.scrollTop;
+        }
+      });
     },
-    [jumpEditorToLine, showToast],
+    [activeTab, viewMode, updateTabById, settings.editorFontSize, settings.editorLineHeight],
   );
 
-  // 阅读态点击事件委托：处理任务列表复选框原位切换 & 代码块一键复制
-  const handleProseClick = useCallback(
-    async (e: React.MouseEvent<HTMLDivElement>) => {
+  // 阅读区点击与双击事件代理：复选框原位切换 + 标题锚点复制 + 图片灯箱 + 双击段落跳源码行
+  const handleReaderClick = useCallback(
+    async (e: React.MouseEvent<HTMLElement>) => {
+      if (!activeTab) return;
       const target = e.target as HTMLElement;
 
-      // 1. 代码块一键复制
-      if (target.classList.contains('ml-code-copy')) {
-        const pre = target.closest('pre');
-        const code = pre?.querySelector('code');
-        const text = code?.textContent ?? '';
-        try {
-          await navigator.clipboard.writeText(text);
-          target.textContent = '✓ 已复制';
-          window.setTimeout(() => {
-            target.textContent = '复制代码';
-          }, 1500);
-        } catch {
-          showToast('复制失败，请手动选择复制');
+      // 1. 标题右侧 # 锚点复制按钮
+      const anchorBtn = target.closest<HTMLElement>('.ml-heading-anchor');
+      if (anchorBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const slug = anchorBtn.getAttribute('data-anchor') ?? '';
+        if (slug) {
+          await navigator.clipboard.writeText(slug);
+          showToast(`已复制标题锚点 ${slug}`);
         }
         return;
       }
 
-      // 2. 阅读态直接点击任务复选框 -> 行级无损写回
-      if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox') {
+      // 2. 点击图片打开内置缩放灯箱（移植自 MarkText SimpleImageViewer）
+      if (target instanceof HTMLImageElement) {
         e.preventDefault();
-        const li = target.closest<HTMLElement>('[data-sourcepos]');
-        const lineNo = extractStartLine(li?.getAttribute('data-sourcepos') ?? null);
-        if (!lineNo) return;
+        setLightbox({
+          src: target.src,
+          alt: target.alt || '图片预览',
+          scale: 1,
+        });
+        return;
+      }
+
+      // 3. 阅读态直接点击任务列表复选框
+      if (target instanceof HTMLInputElement && target.classList.contains('ml-task-checkbox')) {
+        const li = target.closest('[data-sourcepos]');
+        if (!li) return;
+        const sourcepos = li.getAttribute('data-sourcepos') ?? '';
+        const lineStr = sourcepos.split(':')[0];
+        const lineNumber = parseInt(lineStr, 10);
+        if (!Number.isFinite(lineNumber) || lineNumber <= 0) return;
 
         try {
-          const result = await toggleMarkdownTask(content, lineNo, filePath, encoding);
-          setContent(result.content);
-          if (result.saved) {
-            setSavedContent(result.content);
-          }
-          setHtml(result.rendered.html);
-          setToc(result.rendered.toc);
-          setStats(result.rendered.stats);
+          const canAutoWrite = activeTab.filePath && activeTab.content === activeTab.savedContent;
+          const res = await toggleMarkdownTask(
+            activeTab.content,
+            lineNumber,
+            canAutoWrite ? activeTab.filePath : null,
+            canAutoWrite ? activeTab.encoding : null,
+          );
+          updateTabById(activeTab.id, (prev) => ({
+            ...prev,
+            content: res.content,
+            savedContent: res.saved ? res.content : prev.savedContent,
+            html: res.rendered.html,
+            toc: res.rendered.toc,
+            stats: res.rendered.stats,
+          }));
           showToast(
-            result.saved
-              ? `已更新第 ${lineNo} 行任务并无损保存`
-              : `已切换第 ${lineNo} 行任务状态`,
+            res.saved ? `已更新第 ${lineNumber} 行任务并写回磁盘` : `已切换第 ${lineNumber} 行任务状态`,
           );
         } catch (err) {
           showToast(err instanceof Error ? err.message : String(err));
         }
       }
     },
-    [content, encoding, filePath, showToast],
+    [activeTab, updateTabById, showToast],
   );
 
-  // 打开文件对话框
-  const handleOpenFileDialog = useCallback(async () => {
-    try {
-      const session = await pickMarkdownFile();
-      if (session) {
-        applyDocumentSession(session);
-        showToast(`已打开：${session.fileName}`);
+  const handleReaderDoubleClick = useCallback(
+    (e: React.MouseEvent<HTMLElement>) => {
+      const target = e.target as HTMLElement;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLButtonElement ||
+        target instanceof HTMLImageElement ||
+        target.closest('.ml-code-header')
+      ) {
+        return;
       }
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err));
-    }
-  }, [applyDocumentSession, showToast]);
-
-  // 切换左侧同级目录中的 Markdown 文件
-  const handleSelectSibling = useCallback(
-    async (targetPath: string) => {
-      if (targetPath === filePath) return;
-      try {
-        const session = await openMarkdownFile(targetPath);
-        applyDocumentSession(session);
-      } catch (err) {
-        showToast(err instanceof Error ? err.message : String(err));
+      const block = target.closest('[data-sourcepos]');
+      if (!block) return;
+      const sourcepos = block.getAttribute('data-sourcepos') ?? '';
+      const lineNumber = parseInt(sourcepos.split(':')[0] ?? '1', 10);
+      if (Number.isFinite(lineNumber) && lineNumber > 0) {
+        jumpEditorToLine(lineNumber);
+        showToast(`已定位到第 ${lineNumber} 行源码`);
       }
     },
-    [applyDocumentSession, filePath, showToast],
+    [jumpEditorToLine, showToast],
   );
 
-  // 保存当前文件（按原编码无损保存）
-  const handleSave = useCallback(async () => {
-    try {
-      if (filePath) {
-        const session = await saveMarkdownFile(filePath, content, encoding);
-        applyDocumentSession(session);
-        showToast(`已保存（${session.encoding}）`);
-      } else {
-        const session = await saveMarkdownDialog(fileName, content);
-        if (session) {
-          applyDocumentSession(session);
-          showToast(`已另存为：${session.fileName}`);
-        }
-      }
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err));
-    }
-  }, [applyDocumentSession, content, encoding, fileName, filePath, showToast]);
-
-  // 另存为新文件
-  const handleSaveAs = useCallback(async () => {
-    try {
-      const session = await saveMarkdownDialog(fileName, content);
-      if (session) {
-        applyDocumentSession(session);
-        showToast(`已另存为：${session.fileName}`);
-      }
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err));
-    }
-  }, [applyDocumentSession, content, fileName, showToast]);
-
-  // 新建空白文档
-  const handleNewDocument = useCallback(async () => {
-    const initial = '# 未命名文档\n\n在此输入正文内容...\n';
-    setFilePath(null);
-    setFileName('Untitled.md');
-    setDirPath('');
-    setEncoding('UTF-8');
-    setContent(initial);
-    setSavedContent('');
-    const rendered = await renderMarkdown(initial);
-    setHtml(rendered.html);
-    setToc(rendered.toc);
-    setStats(rendered.stats);
-    setViewMode('split');
-    jumpEditorToLine(3);
-  }, [jumpEditorToLine]);
-
-  // 编辑器快捷格式化工具栏指令
-  const applyEditorFormat = useCallback(
-    (
-      kind:
-        | 'h1'
-        | 'h2'
-        | 'h3'
-        | 'bold'
-        | 'italic'
-        | 'highlight'
-        | 'code'
-        | 'codeblock'
-        | 'quote'
-        | 'alert'
-        | 'task'
-        | 'table'
-        | 'link',
-    ) => {
-      const textarea = editorRef.current;
-      if (!textarea) return;
-
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      const selected = content.slice(start, end);
-
-      let replacement = '';
-      let cursorOffset = 0;
-
-      switch (kind) {
-        case 'h1':
-          replacement = `# ${selected || '一级标题'}`;
-          cursorOffset = replacement.length;
-          break;
-        case 'h2':
-          replacement = `## ${selected || '二级标题'}`;
-          cursorOffset = replacement.length;
-          break;
-        case 'h3':
-          replacement = `### ${selected || '三级标题'}`;
-          cursorOffset = replacement.length;
-          break;
-        case 'bold':
-          replacement = `**${selected || '粗体文本'}**`;
-          cursorOffset = selected ? replacement.length : 2 + 4;
-          break;
-        case 'italic':
-          replacement = `*${selected || '斜体文本'}*`;
-          cursorOffset = selected ? replacement.length : 1 + 4;
-          break;
-        case 'highlight':
-          replacement = `==${selected || '重点高亮'}==`;
-          cursorOffset = selected ? replacement.length : 2 + 4;
-          break;
-        case 'code':
-          replacement = `\`${selected || 'code'}\``;
-          cursorOffset = replacement.length;
-          break;
-        case 'codeblock':
-          replacement = `\n\`\`\`ts\n${selected || '// 代码块'}\n\`\`\`\n`;
-          cursorOffset = replacement.length - 5;
-          break;
-        case 'quote':
-          replacement = `> ${selected || '引用文本'}`;
-          cursorOffset = replacement.length;
-          break;
-        case 'alert':
-          replacement = `\n> [!TIP]\n> ${selected || '在这里输入提示内容'}\n`;
-          cursorOffset = replacement.length;
-          break;
-        case 'task':
-          replacement = `- [ ] ${selected || '待办事项'}`;
-          cursorOffset = replacement.length;
-          break;
-        case 'table':
-          replacement = `\n| 列标题 A | 列标题 B | 列标题 C |\n| :--- | :--- | :--- |\n| 内容 1 | 内容 2 | 内容 3 |\n`;
-          cursorOffset = replacement.length;
-          break;
-        case 'link':
-          replacement = `[${selected || '链接文字'}](https://example.com)`;
-          cursorOffset = replacement.length;
-          break;
-      }
-
-      const next = content.slice(0, start) + replacement + content.slice(end);
-      void updateMarkdownContent(next);
-
+  // 编辑器快捷插入与包裹
+  const insertAroundSelection = useCallback(
+    (prefix: string, suffix = '', placeholder = '文本') => {
+      const ta = editorRef.current;
+      if (!ta || !activeTab) return;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const selected = activeTab.content.slice(start, end) || placeholder;
+      const next =
+        activeTab.content.slice(0, start) + prefix + selected + suffix + activeTab.content.slice(end);
+      updateTabById(activeTab.id, (prev) => ({ ...prev, content: next }));
       window.requestAnimationFrame(() => {
-        textarea.focus();
-        const pos = start + cursorOffset;
-        textarea.setSelectionRange(pos, pos);
+        ta.focus();
+        ta.setSelectionRange(start + prefix.length, start + prefix.length + selected.length);
       });
     },
-    [content, updateMarkdownContent],
+    [activeTab, updateTabById],
   );
 
-  // 全局快捷键监听：Ctrl+O / Ctrl+S / Ctrl+E / Ctrl+F / Ctrl+N
+  const insertGridTable = useCallback(
+    (rows: number, cols: number) => {
+      const headerCells = Array.from({ length: cols }, (_, i) => `列 ${i + 1}`).join(' | ');
+      const sepCells = Array.from({ length: cols }, () => ':---').join(' | ');
+      const bodyRows = Array.from({ length: Math.max(1, rows - 1) }, () =>
+        `| ${Array.from({ length: cols }, () => '内容').join(' | ')} |`,
+      ).join('\n');
+      const tableMd = `\n| ${headerCells} |\n| ${sepCells} |\n${bodyRows}\n`;
+      insertAroundSelection(tableMd, '', '');
+      setTablePickerOpen(false);
+    },
+    [insertAroundSelection],
+  );
+
+  // 编辑器按键拦截：支持 Tab 缩进与括号/引号/Markdown 符号自动成对补全
+  const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!activeTab) return;
+    const ta = e.currentTarget;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const spaces = ' '.repeat(settings.tabSize);
+      const next = activeTab.content.slice(0, start) + spaces + activeTab.content.slice(end);
+      updateTabById(activeTab.id, (prev) => ({ ...prev, content: next }));
+      window.requestAnimationFrame(() => {
+        ta.setSelectionRange(start + spaces.length, start + spaces.length);
+      });
+      return;
+    }
+
+    const closeChar = PAIR_MAP[e.key];
+    if (!closeChar) return;
+
+    const isBracket = e.key === '(' || e.key === '[' || e.key === '{';
+    const isQuote = e.key === '"' || e.key === "'";
+    const isMd = e.key === '*' || e.key === '`' || e.key === '=' || e.key === '~';
+
+    if (
+      (isBracket && !settings.autoPairBracket) ||
+      (isQuote && !settings.autoPairQuote) ||
+      (isMd && !settings.autoPairMarkdown)
+    ) {
+      return;
+    }
+
+    if (isMd && start === end && e.key !== '`') {
+      return;
+    }
+
+    e.preventDefault();
+    const selected = activeTab.content.slice(start, end);
+    const next =
+      activeTab.content.slice(0, start) + e.key + selected + closeChar + activeTab.content.slice(end);
+    updateTabById(activeTab.id, (prev) => ({ ...prev, content: next }));
+    window.requestAnimationFrame(() => {
+      ta.setSelectionRange(start + 1, start + 1 + selected.length);
+    });
+  };
+
+  // 更新光标所在行号 + 打字机模式自动居中滚动
+  const syncEditorCursorLine = (ta: HTMLTextAreaElement) => {
+    if (!activeTab) return;
+    const pos = ta.selectionStart;
+    const line = activeTab.content.slice(0, pos).split('\n').length;
+    if (line !== activeTab.activeLine) {
+      updateTabById(activeTab.id, (prev) => ({ ...prev, activeLine: line }));
+    }
+    if (settings.typewriterMode) {
+      const lineHeightPx = Math.round(settings.editorFontSize * settings.editorLineHeight);
+      const targetScroll = line * lineHeightPx - ta.clientHeight * 0.42;
+      if (Math.abs(ta.scrollTop - targetScroll) > lineHeightPx * 1.2) {
+        ta.scrollTo({ top: Math.max(0, targetScroll), behavior: 'smooth' });
+      }
+    }
+  };
+
+  // 全局快捷键监听
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
-
       const key = e.key.toLowerCase();
-      if (key === 'o') {
-        e.preventDefault();
-        void handleOpenFileDialog();
-      } else if (key === 's') {
+
+      if (mod && key === 's') {
         e.preventDefault();
         if (e.shiftKey) {
           void handleSaveAs();
         } else {
           void handleSave();
         }
-      } else if (key === 'e') {
+      } else if (mod && key === 'o') {
         e.preventDefault();
-        setViewMode((prev) => (prev === 'read' ? 'split' : 'read'));
-      } else if (key === 'f') {
+        void handlePickFile();
+      } else if (mod && (key === 'n' || key === 't')) {
+        e.preventDefault();
+        void handleNewTab();
+      } else if (mod && key === 'w') {
+        e.preventDefault();
+        if (activeTab) handleCloseTab(activeTab.id);
+      } else if (mod && key === 'e') {
+        e.preventDefault();
+        setViewMode((m) => (m === 'read' ? 'split' : m === 'split' ? 'edit' : 'read'));
+      } else if (mod && key === 'f') {
         e.preventDefault();
         setSearchOpen(true);
         window.requestAnimationFrame(() => searchInputRef.current?.focus());
-      } else if (key === 'n') {
+      } else if (mod && e.key === ',') {
         e.preventDefault();
-        void handleNewDocument();
-      } else if (key === 'b' && viewMode !== 'read') {
+        setSettingsOpen((v) => !v);
+      } else if (mod && e.key === 'Tab') {
         e.preventDefault();
-        applyEditorFormat('bold');
-      } else if (key === 'i' && viewMode !== 'read') {
-        e.preventDefault();
-        applyEditorFormat('italic');
+        if (tabs.length > 1) {
+          const idx = tabs.findIndex((t) => t.id === activeTabId);
+          const nextIdx = e.shiftKey
+            ? (idx - 1 + tabs.length) % tabs.length
+            : (idx + 1) % tabs.length;
+          setActiveTabId(tabs[nextIdx].id);
+        }
+      } else if (e.key === 'Escape') {
+        if (lightbox) {
+          setLightbox(null);
+        } else if (searchOpen) {
+          setSearchOpen(false);
+          setSearchQuery('');
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [applyEditorFormat, handleNewDocument, handleOpenFileDialog, handleSave, handleSaveAs, viewMode]);
-
-  // 点击右侧大纲跳转
-  const handleTocClick = useCallback(
-    (item: TocItem) => {
-      setActiveLine(item.line);
-      const headingEl = document.getElementById(item.id);
-      if (headingEl) {
-        headingEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-      if (viewMode !== 'read') {
-        jumpEditorToLine(item.line);
-      }
-    },
-    [jumpEditorToLine, viewMode],
-  );
+  }, [
+    handleSave,
+    handleSaveAs,
+    handlePickFile,
+    handleNewTab,
+    handleCloseTab,
+    activeTab,
+    tabs,
+    activeTabId,
+    lightbox,
+    searchOpen,
+  ]);
 
   const filteredSiblings = useMemo(() => {
-    const q = siblingFilter.trim().toLowerCase();
-    if (!q) return siblings;
-    return siblings.filter((item) => item.name.toLowerCase().includes(q));
-  }, [siblingFilter, siblings]);
+    const list = activeTab?.siblings ?? [];
+    const q = fileFilter.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((f) => f.name.toLowerCase().includes(q));
+  }, [activeTab?.siblings, fileFilter]);
+
+  const tabSummaries: DocTabSummary[] = useMemo(
+    () =>
+      tabs.map((t) => ({
+        id: t.id,
+        fileName: t.fileName,
+        filePath: t.filePath,
+        dirty: t.content !== t.savedContent,
+        encoding: t.encoding,
+      })),
+    [tabs],
+  );
+
+  const editorLineCount = useMemo(() => {
+    if (!activeTab) return 1;
+    return Math.max(1, activeTab.content.split('\n').length);
+  }, [activeTab?.content]);
+
+  const cycleStatsUnit = () => {
+    const order: StatsUnit[] = ['words', 'chars', 'charsWithSpaces', 'paragraphs'];
+    const idx = order.indexOf(settings.statsUnit);
+    const nextUnit = order[(idx + 1) % order.length];
+    updateSettings({ ...settings, statsUnit: nextUnit });
+  };
+
+  const cyclePageWidth = () => {
+    const modes: PageWidthMode[] = ['compact', 'comfortable', 'wide', 'xwide', 'full'];
+    const idx = modes.indexOf(settings.pageWidthMode);
+    const nextMode = modes[(idx + 1) % modes.length];
+    updateSettings({ ...settings, pageWidthMode: nextMode });
+    showToast(`版心宽度：${PAGE_WIDTH_MAP[nextMode].label}`);
+  };
+
+  const stats = activeTab?.stats ?? EMPTY_STATS;
+  const statsBadgeText = useMemo(() => {
+    switch (settings.statsUnit) {
+      case 'words':
+        return `${stats.words} 词`;
+      case 'chars':
+        return `${stats.chars} 字`;
+      case 'charsWithSpaces':
+        return `${stats.charsWithSpaces} 字符`;
+      case 'paragraphs':
+        return `${stats.paragraphs} 段落`;
+    }
+  }, [settings.statsUnit, stats]);
 
   return (
-    <div className="ml-workbench" data-theme={theme}>
-      {/* ==================== 顶部工具栏 ==================== */}
-      <header className="ml-topbar">
-        <div className="ml-topbar-left">
+    <div
+      className="ml-workbench"
+      style={{
+        zoom: settings.uiZoom / 100,
+      }}
+    >
+      {/* 1. 一体化无边框标题栏 + 多页签栏 */}
+      <TitleBar
+        tabs={tabSummaries}
+        activeTabId={activeTab.id}
+        appVersion={appVersion}
+        onSelectTab={setActiveTabId}
+        onCloseTab={handleCloseTab}
+        onCloseOtherTabs={handleCloseOtherTabs}
+        onCloseTabsToRight={handleCloseTabsToRight}
+        onReorderTabs={handleReorderTabs}
+        onNewTab={(afterId) => void handleNewTab(afterId)}
+        onOpenFile={() => void handlePickFile()}
+        onSave={() => void handleSave()}
+        onSaveAs={() => void handleSaveAs()}
+        onCopyRichText={() => void handleCopyRichText()}
+        onCopyHtml={() => void handleCopyHtml()}
+        onCopyMarkdown={() => void handleCopyMarkdown()}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onCopyPath={(p) => {
+          void navigator.clipboard.writeText(p);
+          showToast('已复制文件完整路径');
+        }}
+      />
+
+      {/* 2. 主工具栏（复刻 git-extensions 分组簇 + SVG 图标风格） */}
+      <div className="ml-toolbar">
+        {/* 左侧：侧栏开关与文件操作簇 */}
+        <div className="ml-toolbar-group">
           <button
             type="button"
-            className={`ml-icon-btn ${showLeftSidebar ? 'is-active' : ''}`}
-            onClick={() => setShowLeftSidebar((v) => !v)}
-            title="切换同级目录面板"
+            className={`ml-tool-btn ${leftOpen ? 'is-active' : ''}`}
+            title="切换同目录文件侧栏"
+            onClick={() => setLeftOpen((v) => !v)}
           >
-            ☰ 目录
+            <Icon name="sidebar-left" size={15} />
           </button>
           <button
             type="button"
-            className="ml-btn"
-            onClick={handleOpenFileDialog}
-            title="打开 Markdown 文件 (Ctrl+O)"
+            className="ml-tool-btn"
+            title="新建草稿页签 (Ctrl+N)"
+            onClick={() => void handleNewTab()}
           >
-            📂 打开
+            <Icon name="plus" size={15} />
+            <span className="ml-tool-label">新建</span>
           </button>
           <button
             type="button"
-            className="ml-btn"
-            onClick={handleNewDocument}
-            title="新建文档 (Ctrl+N)"
+            className="ml-tool-btn"
+            title="打开本地 Markdown 文件 (Ctrl+O)"
+            onClick={() => void handlePickFile()}
           >
-            ＋ 新建
+            <Icon name="folder" size={15} />
+            <span className="ml-tool-label">打开</span>
           </button>
           <button
             type="button"
-            className={`ml-btn ${isDirty ? 'ml-btn-primary' : ''}`}
-            onClick={handleSave}
-            title="保存文档 (Ctrl+S)"
+            className={`ml-tool-btn ${isDirty ? 'is-primary' : ''}`}
+            title="保存当前文档 (Ctrl+S)"
+            onClick={() => void handleSave()}
           >
-            💾 保存
+            <Icon name="save" size={15} />
+            <span className="ml-tool-label">{isDirty ? '保存*' : '保存'}</span>
           </button>
+
+          {/* 复制导出下拉按钮 */}
+          <div className="ml-dropdown-anchor" onMouseDown={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="ml-tool-btn"
+              title="多格式复制 (富文本 / HTML / Markdown)"
+              onClick={() => setCopyMenuOpen((v) => !v)}
+            >
+              <Icon name="copy" size={14} />
+              <span className="ml-tool-label">复制为</span>
+              <Icon name="chevron-down" size={12} />
+            </button>
+            {copyMenuOpen && (
+              <div className="ml-popover-menu">
+                <button
+                  type="button"
+                  className="ml-context-item"
+                  onClick={() => {
+                    setCopyMenuOpen(false);
+                    void handleCopyRichText();
+                  }}
+                >
+                  <span>复制为富文本 (Word / 飞书 / Notion)</span>
+                </button>
+                <button
+                  type="button"
+                  className="ml-context-item"
+                  onClick={() => {
+                    setCopyMenuOpen(false);
+                    void handleCopyHtml();
+                  }}
+                >
+                  <span>复制 HTML 源码</span>
+                </button>
+                <button
+                  type="button"
+                  className="ml-context-item"
+                  onClick={() => {
+                    setCopyMenuOpen(false);
+                    void handleCopyMarkdown();
+                  }}
+                >
+                  <span>复制 Markdown 源码</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="ml-topbar-center">
-          <div className="ml-doc-title" title={filePath ?? '内置演示文档（未落盘）'}>
-            <span className="ml-leaf-badge">🍃</span>
-            <span className="ml-doc-filename">{fileName}</span>
-            {isDirty && <span className="ml-dirty-dot" title="有未保存的修改">●</span>}
-          </div>
+        <div className="ml-toolbar-sep" />
 
-          <div className="ml-mode-segmented" role="tablist" aria-label="视图模式切换">
+        {/* 中部：阅读/分屏/源码三态切换器 + 版心行宽 + 打字机/专注模式 */}
+        <div className="ml-toolbar-group">
+          <div className="ml-mode-segmented" role="group" aria-label="视图模式切换">
             <button
               type="button"
               className={`ml-seg-btn ${viewMode === 'read' ? 'is-active' : ''}`}
               onClick={() => setViewMode('read')}
-              title="纯净阅读模式 (双击任意段落可就地编辑)"
+              title="纯净阅读模式 (双击正文任意段落可跳入对应源码行)"
             >
-              📖 阅读
+              <Icon name="eye" size={14} />
+              <span>阅读</span>
             </button>
             <button
               type="button"
               className={`ml-seg-btn ${viewMode === 'split' ? 'is-active' : ''}`}
               onClick={() => setViewMode('split')}
-              title="分屏实时预览模式 (Ctrl+E)"
+              title="左编右读实时分屏模式 (Ctrl+E)"
             >
-              ◫ 分屏
+              <Icon name="columns" size={14} />
+              <span>分屏</span>
             </button>
             <button
               type="button"
@@ -585,334 +1180,605 @@ export default function App() {
               onClick={() => setViewMode('edit')}
               title="专注源码编辑模式"
             >
-              ✍️ 编辑
+              <Icon name="edit" size={14} />
+              <span>源码</span>
             </button>
           </div>
-        </div>
 
-        <div className="ml-topbar-right">
           <button
             type="button"
-            className={`ml-icon-btn ${searchOpen ? 'is-active' : ''}`}
-            onClick={() => {
-              setSearchOpen((v) => !v);
-              window.requestAnimationFrame(() => searchInputRef.current?.focus());
-            }}
-            title="页内查找 (Ctrl+F)"
+            className={`ml-tool-btn ${settings.pageWidthMode === 'full' ? 'is-active' : ''}`}
+            title={`当前行宽：${PAGE_WIDTH_MAP[settings.pageWidthMode].label}（点击循环切换）`}
+            onClick={cyclePageWidth}
           >
-            🔍 查找
+            <Icon name="width" size={15} />
+            <span className="ml-tool-label">
+              {settings.pageWidthMode === 'full' ? '全宽' : PAGE_WIDTH_MAP[settings.pageWidthMode].cssMaxWidth}
+            </span>
           </button>
 
-          <div className="ml-font-controls" title="调节正文字号">
-            <button
-              type="button"
-              className="ml-mini-btn"
-              onClick={() => setFontSize((s) => Math.max(13, s - 1))}
-            >
-              A-
-            </button>
-            <span className="ml-font-label">{fontSize}px</span>
-            <button
-              type="button"
-              className="ml-mini-btn"
-              onClick={() => setFontSize((s) => Math.min(24, s + 1))}
-            >
-              A+
-            </button>
+          <button
+            type="button"
+            className={`ml-tool-btn ${settings.typewriterMode ? 'is-active' : ''}`}
+            title="打字机滚动模式：编辑时光标行始终保持纵向居中"
+            onClick={() => {
+              const next = !settings.typewriterMode;
+              updateSettings({ ...settings, typewriterMode: next });
+              showToast(next ? '已开启打字机居中滚动模式' : '已关闭打字机滚动模式');
+            }}
+          >
+            <Icon name="typewriter" size={15} />
+          </button>
+
+          <button
+            type="button"
+            className={`ml-tool-btn ${settings.focusMode ? 'is-active' : ''}`}
+            title="专注模式：突出高亮当前活跃段落，柔和淡化周围段落"
+            onClick={() => {
+              const next = !settings.focusMode;
+              updateSettings({ ...settings, focusMode: next });
+              showToast(next ? '已开启段落专注模式' : '已关闭段落专注模式');
+            }}
+          >
+            <Icon name="focus" size={15} />
+          </button>
+        </div>
+
+        <div className="ml-toolbar-spacer" />
+
+        {/* 右侧：内嵌搜索框、MarkText 四维字数胶囊、快速主题选择、大纲与设置按钮 */}
+        <div className="ml-toolbar-group">
+          <div className={`ml-filter-box ${searchOpen || searchQuery ? 'is-active' : ''}`}>
+            <Icon name="search" size={13} />
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="查找正文 (Ctrl+F)…"
+              value={searchQuery}
+              onFocus={() => setSearchOpen(true)}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="ml-filter-clear"
+                title="清空查找"
+                onClick={() => setSearchQuery('')}
+              >
+                <Icon name="close" size={12} />
+              </button>
+            )}
           </div>
 
+          {/* 移植自 MarkText TitleBar 的可点击切换维度字数统计胶囊 */}
+          <div
+            className="ml-stats-pill-wrap"
+            onMouseEnter={() => setStatsHover(true)}
+            onMouseLeave={() => setStatsHover(false)}
+          >
+            <button
+              type="button"
+              className="ml-stats-pill"
+              title="点击切换统计单位 (词数 / 字数 / 字符 / 段落)"
+              onClick={cycleStatsUnit}
+            >
+              <span>{statsBadgeText}</span>
+              <span className="ml-stats-pill-dot">·</span>
+              <span>约 {stats.readingMinutes} 分钟</span>
+            </button>
+            {statsHover && (
+              <div className="ml-stats-popover">
+                <div className="ml-stats-popover-title">文档实时统计 (点击胶囊切换单位)</div>
+                <div className="ml-stats-popover-row">
+                  <span>词数 (Words)</span>
+                  <strong>{stats.words}</strong>
+                </div>
+                <div className="ml-stats-popover-row">
+                  <span>字数 (不含空格)</span>
+                  <strong>{stats.chars}</strong>
+                </div>
+                <div className="ml-stats-popover-row">
+                  <span>总字符 (含空格)</span>
+                  <strong>{stats.charsWithSpaces}</strong>
+                </div>
+                <div className="ml-stats-popover-row">
+                  <span>段落数 (Paragraphs)</span>
+                  <strong>{stats.paragraphs}</strong>
+                </div>
+                <div className="ml-stats-popover-row">
+                  <span>总行数 (Lines)</span>
+                  <strong>{stats.lines}</strong>
+                </div>
+                {stats.tasksTotal > 0 && (
+                  <div className="ml-stats-popover-row">
+                    <span>任务列表完成度</span>
+                    <strong>
+                      {stats.tasksDone} / {stats.tasksTotal}
+                    </strong>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 主题快速选择器 */}
           <select
             className="ml-theme-select"
-            value={theme}
-            onChange={(e) => setTheme(e.target.value as ThemeMode)}
-            aria-label="选择阅读排版主题"
+            value={effectiveTheme}
+            onChange={(e) =>
+              updateSettings({
+                ...settings,
+                followSystemTheme: false,
+                theme: e.target.value as ThemeId,
+              })
+            }
+            title="快速切换排版主题"
           >
             {THEME_OPTIONS.map((t) => (
               <option key={t.id} value={t.id}>
-                🎨 {t.label}
+                {t.label}
               </option>
             ))}
           </select>
 
           <button
             type="button"
-            className={`ml-icon-btn ${showRightOutline ? 'is-active' : ''}`}
-            onClick={() => setShowRightOutline((v) => !v)}
-            title="切换右侧大纲 (TOC)"
+            className={`ml-tool-btn ${rightOpen ? 'is-active' : ''}`}
+            title="切换右侧大纲目录 (TOC)"
+            onClick={() => setRightOpen((v) => !v)}
           >
-            📑 大纲
+            <Icon name="sidebar-right" size={15} />
           </button>
-        </div>
-      </header>
 
-      {/* ==================== 页内检索条 ==================== */}
-      {searchOpen && (
-        <div className="ml-search-bar">
-          <input
-            ref={searchInputRef}
-            type="search"
-            className="ml-search-input"
-            placeholder="输入关键字高亮匹配段落（支持实时过滤）…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setSearchOpen(false);
-                setSearchQuery('');
-              }
-            }}
-          />
           <button
             type="button"
-            className="ml-mini-btn"
-            onClick={() => {
-              setSearchOpen(false);
-              setSearchQuery('');
-            }}
+            className="ml-tool-btn"
+            title="偏好设置 (Ctrl+,)"
+            onClick={() => setSettingsOpen(true)}
           >
-            关闭 (Esc)
+            <Icon name="settings" size={15} />
           </button>
         </div>
-      )}
+      </div>
 
-      {/* ==================== 主体三栏工作区 ==================== */}
+      {/* 3. 主工作台：左侧同级文件树 + 中央画布 + 右侧浮动大纲 */}
       <div className="ml-body">
-        {/* 左侧栏：同级目录 Markdown 文件树 */}
-        {showLeftSidebar && (
+        {leftOpen && (
           <aside className="ml-sidebar-left">
             <div className="ml-panel-header">
-              <span>📁 同级目录文档</span>
-              <span className="ml-badge-count">{siblings.length}</span>
+              <span>同级目录文档</span>
+              <span className="ml-badge-count">{activeTab.siblings.length}</span>
             </div>
-            {dirPath && (
-              <div className="ml-dir-path" title={dirPath}>
-                {dirPath}
+            {activeTab.dirPath && (
+              <div className="ml-dir-path" title={activeTab.dirPath}>
+                {activeTab.dirPath}
               </div>
             )}
             <div className="ml-sidebar-search">
               <input
-                type="search"
-                placeholder="过滤同目录 .md 文件…"
-                value={siblingFilter}
-                onChange={(e) => setSiblingFilter(e.target.value)}
+                type="text"
+                placeholder="筛选文件名…"
+                value={fileFilter}
+                onChange={(e) => setFileFilter(e.target.value)}
               />
             </div>
-
             <div className="ml-file-list">
-              {filteredSiblings.length > 0 ? (
-                filteredSiblings.map((item) => (
-                  <button
-                    key={item.path}
-                    type="button"
-                    className={`ml-file-item ${item.path === filePath || item.active ? 'is-active' : ''}`}
-                    onClick={() => handleSelectSibling(item.path)}
-                    title={item.path}
-                  >
-                    <span className="ml-file-icon">📄</span>
-                    <span className="ml-file-name">{item.name}</span>
-                  </button>
-                ))
-              ) : (
+              {filteredSiblings.length === 0 ? (
                 <div className="ml-empty-hint">
-                  <p>当前为内置欢迎文档。</p>
-                  <p>
-                    点击上方 <strong>📂 打开</strong> 或直接双击系统中的 <code>.md</code>{' '}
-                    文件，此处会自动列出同文件夹下的所有 Markdown 文档供一键秒切。
-                  </p>
+                  {activeTab.filePath
+                    ? '没有匹配的同级 .md 文件'
+                    : '点击「打开」加载本地 .md 文件后，此处将自动列出同目录下的全部 Markdown 文档。'}
                 </div>
+              ) : (
+                filteredSiblings.map((item) => {
+                  const isCurrent =
+                    activeTab.filePath &&
+                    item.path.toLowerCase() === activeTab.filePath.toLowerCase();
+                  return (
+                    <button
+                      key={item.path}
+                      type="button"
+                      className={`ml-file-item ${isCurrent ? 'is-active' : ''}`}
+                      onClick={() => void openPathInTab(item.path)}
+                      title={item.path}
+                    >
+                      <Icon name="file" size={13} />
+                      <span className="ml-file-name">{item.name}</span>
+                    </button>
+                  );
+                })
               )}
             </div>
           </aside>
         )}
 
-        {/* 中间主工作区：便捷编辑器 + 印刷级阅读视图 */}
+        {/* 中央主舞台：编辑区（带行号水槽 + 网格建表器） & 阅读区 */}
         <main className={`ml-main-stage mode-${viewMode}`}>
-          {/* 编辑面板（在 split 或 edit 模式下展示） */}
-          {viewMode !== 'read' && (
+          {(viewMode === 'edit' || viewMode === 'split') && (
             <section className="ml-editor-pane">
+              {/* 编辑器格式化快捷工具条 */}
               <div className="ml-editor-toolbar">
-                <button type="button" onClick={() => applyEditorFormat('h1')} title="一级标题">
-                  H1
-                </button>
-                <button type="button" onClick={() => applyEditorFormat('h2')} title="二级标题">
-                  H2
-                </button>
-                <button type="button" onClick={() => applyEditorFormat('h3')} title="三级标题">
-                  H3
-                </button>
-                <span className="ml-toolbar-divider" />
-                <button
-                  type="button"
-                  onClick={() => applyEditorFormat('bold')}
-                  title="粗体 (Ctrl+B)"
-                >
-                  <strong>B</strong>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyEditorFormat('italic')}
-                  title="斜体 (Ctrl+I)"
-                >
-                  <em>I</em>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyEditorFormat('highlight')}
-                  title="荧光笔高亮 ==text=="
-                >
-                  🖍 高亮
-                </button>
-                <button type="button" onClick={() => applyEditorFormat('code')} title="行内代码">
-                  {'</>'}
-                </button>
-                <span className="ml-toolbar-divider" />
-                <button
-                  type="button"
-                  onClick={() => applyEditorFormat('task')}
-                  title="插入任务复选框"
-                >
-                  ☑ 任务
-                </button>
-                <button type="button" onClick={() => applyEditorFormat('quote')} title="引用块">
-                  ❝ 引用
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyEditorFormat('alert')}
-                  title="插入 GitHub Alert 提示卡片"
-                >
-                  💡 Alert
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyEditorFormat('codeblock')}
-                  title="插入代码块"
-                >
-                  📦 代码块
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyEditorFormat('table')}
-                  title="插入 GFM 表格"
-                >
-                  ⊞ 表格
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyEditorFormat('link')}
-                  title="插入超链接"
-                >
-                  🔗 链接
-                </button>
+                <div className="ml-toolbar-group">
+                  <button
+                    type="button"
+                    onClick={() => insertAroundSelection('## ', '', '二级标题')}
+                    title="插入二级标题"
+                  >
+                    H2
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => insertAroundSelection('### ', '', '三级标题')}
+                    title="插入三级标题"
+                  >
+                    H3
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => insertAroundSelection('**', '**', '加粗文本')}
+                    title="粗体 (**文本**)"
+                  >
+                    <Icon name="bold" size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => insertAroundSelection('*', '*', '斜体文本')}
+                    title="斜体 (*文本*)"
+                  >
+                    <Icon name="italic" size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => insertAroundSelection('~~', '~~', '删除线文本')}
+                    title="删除线 (~~文本~~)"
+                  >
+                    <Icon name="strikethrough" size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => insertAroundSelection('==', '==', '重点高亮')}
+                    title="荧光笔高亮 (==文本==)"
+                  >
+                    <Icon name="highlight" size={13} />
+                  </button>
+                </div>
+
+                <div className="ml-toolbar-sep" />
+
+                <div className="ml-toolbar-group">
+                  <button
+                    type="button"
+                    onClick={() => insertAroundSelection('`', '`', 'code')}
+                    title="行内代码 (`code`)"
+                  >
+                    <Icon name="code" size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => insertAroundSelection('\n```rust\n', '\n```\n', '// 代码块')}
+                    title="插入代码块"
+                  >
+                    <Icon name="code-block" size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => insertAroundSelection('> ', '', '引用内容')}
+                    title="插入引用"
+                  >
+                    <Icon name="quote" size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => insertAroundSelection('- [ ] ', '', '待办事项')}
+                    title="插入任务列表"
+                  >
+                    <Icon name="task" size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => insertAroundSelection('[', '](https://)', '链接文字')}
+                    title="插入超链接"
+                  >
+                    <Icon name="link" size={13} />
+                  </button>
+
+                  {/* 移植自 MarkText 的可视化 2D 网格建表器 (Table Chessboard) */}
+                  <div className="ml-dropdown-anchor" onMouseDown={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      title="可视化网格插入表格 (Table Picker)"
+                      onClick={() => setTablePickerOpen((v) => !v)}
+                    >
+                      <Icon name="table" size={13} />
+                      <span>表格</span>
+                    </button>
+                    {tablePickerOpen && (
+                      <div className="ml-table-picker-popover">
+                        <div className="ml-table-picker-header">
+                          插入表格：{tableHover.rows} 行 × {tableHover.cols} 列
+                        </div>
+                        <div className="ml-table-grid">
+                          {Array.from({ length: 6 }, (_, rIdx) => {
+                            const r = rIdx + 1;
+                            return (
+                              <div key={r} className="ml-table-grid-row">
+                                {Array.from({ length: 7 }, (_, cIdx) => {
+                                  const c = cIdx + 1;
+                                  const active = r <= tableHover.rows && c <= tableHover.cols;
+                                  return (
+                                    <button
+                                      key={c}
+                                      type="button"
+                                      className={`ml-table-cell ${active ? 'is-active' : ''}`}
+                                      onMouseEnter={() => setTableHover({ rows: Math.max(2, r), cols: Math.max(2, c) })}
+                                      onClick={() => insertGridTable(Math.max(2, r), Math.max(2, c))}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* GitHub Alerts 五色提示块下拉选择器 */}
+                  <div className="ml-dropdown-anchor" onMouseDown={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      title="插入 GitHub Alerts 提示卡片"
+                      onClick={() => setAlertMenuOpen((v) => !v)}
+                    >
+                      <Icon name="alert" size={13} />
+                      <span>提示块</span>
+                    </button>
+                    {alertMenuOpen && (
+                      <div className="ml-popover-menu">
+                        {(['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION'] as const).map((kind) => (
+                          <button
+                            key={kind}
+                            type="button"
+                            className="ml-context-item"
+                            onClick={() => {
+                              setAlertMenuOpen(false);
+                              insertAroundSelection(`\n> [!${kind}]\n> `, '\n', '在此输入提示内容');
+                            }}
+                          >
+                            <span>[!{kind}] 提示卡片</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => insertAroundSelection('\n---\n', '', '')}
+                    title="插入水平分割线"
+                  >
+                    <Icon name="hr" size={13} />
+                  </button>
+                </div>
               </div>
 
-              <textarea
-                ref={editorRef}
-                className="ml-editor-textarea"
-                value={content}
-                onChange={(e) => void updateMarkdownContent(e.target.value)}
-                onClick={(e) => {
-                  const target = e.currentTarget;
-                  const line = target.value.slice(0, target.selectionStart).split('\n').length;
-                  setActiveLine(line);
-                }}
-                onKeyUp={(e) => {
-                  const target = e.currentTarget;
-                  const line = target.value.slice(0, target.selectionStart).split('\n').length;
-                  setActiveLine(line);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Tab') {
-                    e.preventDefault();
-                    const target = e.currentTarget;
-                    const start = target.selectionStart;
-                    const end = target.selectionEnd;
-                    const next = content.slice(0, start) + '  ' + content.slice(end);
-                    void updateMarkdownContent(next);
-                    window.requestAnimationFrame(() => {
-                      target.selectionStart = target.selectionEnd = start + 2;
-                    });
-                  }
-                }}
-                spellCheck={false}
-                placeholder="输入 Markdown 内容…"
-              />
+              {/* 编辑器主体（左侧行号水槽 + 右侧源码编辑区） */}
+              <div className="ml-editor-body">
+                {settings.editorLineNumbers !== 'off' && (
+                  <div
+                    ref={gutterRef}
+                    className="ml-editor-gutter"
+                    style={{
+                      fontSize: `${settings.editorFontSize}px`,
+                      lineHeight: settings.editorLineHeight,
+                    }}
+                    aria-hidden="true"
+                  >
+                    {Array.from({ length: editorLineCount }, (_, idx) => {
+                      const ln = idx + 1;
+                      const isActive = ln === activeTab.activeLine;
+                      const showLabel =
+                        settings.editorLineNumbers === 'full' ||
+                        ln === 1 ||
+                        ln % 10 === 0 ||
+                        isActive;
+                      return (
+                        <div
+                          key={ln}
+                          className={`ml-gutter-line ${isActive ? 'is-active' : ''}`}
+                        >
+                          {showLabel ? ln : '·'}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <textarea
+                  ref={editorRef}
+                  className="ml-editor-textarea"
+                  value={activeTab.content}
+                  wrap={settings.editorWordWrap ? 'soft' : 'off'}
+                  style={{
+                    fontSize: `${settings.editorFontSize}px`,
+                    lineHeight: settings.editorLineHeight,
+                    tabSize: settings.tabSize,
+                  }}
+                  onChange={(e) => {
+                    const nextText = e.target.value;
+                    updateTabById(activeTab.id, (prev) => ({ ...prev, content: nextText }));
+                    syncEditorCursorLine(e.currentTarget);
+                  }}
+                  onClick={(e) => syncEditorCursorLine(e.currentTarget)}
+                  onKeyUp={(e) => syncEditorCursorLine(e.currentTarget)}
+                  onKeyDown={handleEditorKeyDown}
+                  onScroll={(e) => {
+                    if (gutterRef.current) {
+                      gutterRef.current.scrollTop = e.currentTarget.scrollTop;
+                    }
+                  }}
+                  spellCheck={false}
+                  placeholder="在此输入 Markdown 内容…"
+                />
+              </div>
             </section>
           )}
 
-          {/* 阅读/预览面板（在 read 或 split 模式下展示） */}
-          {viewMode !== 'edit' && (
-            <section className="ml-reader-pane">
+          {(viewMode === 'read' || viewMode === 'split') && (
+            <section
+              ref={readerRef}
+              className="ml-reader-pane"
+              onClick={(e) => void handleReaderClick(e)}
+              onDoubleClick={handleReaderDoubleClick}
+            >
               <article
-                ref={proseRef}
-                className="ml-prose"
-                style={{ fontSize: `${fontSize}px` }}
-                onClick={handleProseClick}
-                onDoubleClick={handleProseDoubleClick}
-                dangerouslySetInnerHTML={{ __html: html }}
+                className={[
+                  'ml-prose',
+                  settings.showBlockLineBadge ? 'show-line-badge' : '',
+                  settings.showHeadingAnchor ? 'show-heading-anchor' : '',
+                  settings.codeBlockLineNumbers ? 'show-code-ln' : '',
+                  settings.wrapCodeBlocks ? 'wrap-code' : '',
+                  settings.focusMode ? 'focus-mode' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                style={{
+                  maxWidth: PAGE_WIDTH_MAP[settings.pageWidthMode].cssMaxWidth,
+                  fontFamily: FONT_PRESET_MAP[settings.proseFontFamily].cssValue,
+                  fontSize: `${settings.proseFontSize}px`,
+                  lineHeight: settings.proseLineHeight,
+                }}
+                dangerouslySetInnerHTML={{ __html: activeTab.html }}
               />
             </section>
           )}
         </main>
 
-        {/* 右侧栏：响应式浮动大纲 (TOC) */}
-        {showRightOutline && (
+        {/* 右侧文档目录大纲 (TOC) */}
+        {rightOpen && (
           <aside className="ml-sidebar-right">
             <div className="ml-panel-header">
-              <span>📑 文档大纲</span>
-              <span className="ml-badge-count">{toc.length}</span>
+              <span>文档大纲 (TOC)</span>
+              <span className="ml-badge-count">{activeTab.toc.length}</span>
             </div>
-            <nav className="ml-toc-list" aria-label="文档章节大纲">
-              {toc.length > 0 ? (
-                toc.map((item) => (
+            <nav className={`ml-toc-list ${settings.wordWrapInToc ? 'is-wrapped' : ''}`}>
+              {activeTab.toc.length === 0 ? (
+                <div className="ml-empty-hint">当前文档暂无标题大纲</div>
+              ) : (
+                activeTab.toc.map((item) => (
                   <button
                     key={item.id}
                     type="button"
-                    className={`ml-toc-item level-${item.level} ${activeLine === item.line ? 'is-active' : ''}`}
-                    onClick={() => handleTocClick(item)}
+                    className={`ml-toc-item level-${item.level} ${
+                      activeTab.activeLine === item.line ? 'is-active' : ''
+                    }`}
+                    onClick={() => {
+                      updateTabById(activeTab.id, (prev) => ({ ...prev, activeLine: item.line }));
+                      if (viewMode === 'edit') {
+                        jumpEditorToLine(item.line);
+                      } else {
+                        const headingEl = document.getElementById(item.id);
+                        headingEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    }}
                     title={`跳转到第 ${item.line} 行：${item.text}`}
                   >
                     <span className="ml-toc-text">{item.text}</span>
                     <span className="ml-toc-line">L{item.line}</span>
                   </button>
                 ))
-              ) : (
-                <div className="ml-empty-hint">文档暂无标题章节</div>
               )}
             </nav>
           </aside>
         )}
       </div>
 
-      {/* ==================== 底部状态栏 ==================== */}
+      {/* 4. 底部状态栏 */}
       <footer className="ml-statusbar">
         <div className="ml-status-left">
-          <span className="ml-status-pill">
-            <strong>{appInfo.name}</strong> v{appInfo.version}
-          </span>
-          <span className="ml-status-item">定位：第 {activeLine} 行</span>
-          <span className="ml-status-item" title="保存时将严格沿用该文件编码">
-            编码：{encoding}
-          </span>
-          {viewMode === 'read' && (
-            <span className="ml-status-tip">💡 提示：双击任意段落可精准定位到该行进行编辑</span>
-          )}
-        </div>
-
-        <div className="ml-status-right">
+          <span title="文件编码（保存时严格按原编码写回，不乱码）">编码: {activeTab.encoding}</span>
+          <span>行 {activeTab.activeLine} / 共 {stats.lines} 行</span>
+          <span>版心: {PAGE_WIDTH_MAP[settings.pageWidthMode].label}</span>
           {stats.tasksTotal > 0 && (
-            <span className="ml-status-item ml-task-stat">
-              ☑ 任务 {stats.tasksDone}/{stats.tasksTotal}
+            <span className="ml-task-stat">
+              任务进度: {stats.tasksDone}/{stats.tasksTotal}
             </span>
           )}
-          <span className="ml-status-item">{stats.words} 词</span>
-          <span className="ml-status-item">{stats.chars} 字符</span>
-          <span className="ml-status-item">{stats.lines} 行</span>
-          <span className="ml-status-item">约 {stats.readingMinutes} 分钟阅读</span>
+        </div>
+        <div className="ml-status-right">
+          {viewMode === 'read' && (
+            <span className="ml-status-tip">💡 双击任意段落精准跳至对应源码行 · 点击任务框直接写回</span>
+          )}
+          <span>{stats.words} 词</span>
+          <span>{stats.chars} 字</span>
+          <span>约 {stats.readingMinutes} 分钟阅读</span>
         </div>
       </footer>
 
-      {toastMessage && <div className="ml-toast">{toastMessage}</div>}
+      {/* 5. 偏好设置双栏弹窗 */}
+      <SettingsDialog
+        open={settingsOpen}
+        settings={settings}
+        onSave={updateSettings}
+        onClose={() => setSettingsOpen(false)}
+      />
+
+      {/* 6. 内置图片灯箱预览器 (Lightbox Viewer) */}
+      {lightbox && (
+        <div className="ml-lightbox-backdrop" onClick={() => setLightbox(null)}>
+          <div className="ml-lightbox-toolbar" onClick={(e) => e.stopPropagation()}>
+            <span>{lightbox.alt}</span>
+            <button
+              type="button"
+              onClick={() =>
+                setLightbox((prev) =>
+                  prev ? { ...prev, scale: Math.max(0.25, prev.scale - 0.25) } : null,
+                )
+              }
+            >
+              缩小 -
+            </button>
+            <span>{Math.round(lightbox.scale * 100)}%</span>
+            <button
+              type="button"
+              onClick={() =>
+                setLightbox((prev) =>
+                  prev ? { ...prev, scale: Math.min(4, prev.scale + 0.25) } : null,
+                )
+              }
+            >
+              放大 +
+            </button>
+            <button
+              type="button"
+              onClick={() => setLightbox((prev) => (prev ? { ...prev, scale: 1 } : null))}
+            >
+              1:1
+            </button>
+            <button type="button" onClick={() => setLightbox(null)}>
+              关闭 (Esc)
+            </button>
+          </div>
+          <img
+            src={lightbox.src}
+            alt={lightbox.alt}
+            className="ml-lightbox-img"
+            style={{ transform: `scale(${lightbox.scale})` }}
+            onClick={(e) => e.stopPropagation()}
+            onWheel={(e) => {
+              e.stopPropagation();
+              const delta = e.deltaY < 0 ? 0.15 : -0.15;
+              setLightbox((prev) =>
+                prev ? { ...prev, scale: Math.min(5, Math.max(0.2, prev.scale + delta)) } : null,
+              );
+            }}
+          />
+        </div>
+      )}
+
+      {toast && <div className="ml-toast">{toast}</div>}
     </div>
   );
 }
+
+export default App;

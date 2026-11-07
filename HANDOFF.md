@@ -12,8 +12,8 @@
 
 ## 状态快照
 
-- **最近更新**：2026-11-06
-- **整体状态**：✅ 空闲（M1 极速阅读与便捷编辑工作台已全部完成并通过全量门禁验证）
+- **最近更新**：2026-11-07
+- **整体状态**：✅ 空闲（M1.5 无边框多页签标题栏、品牌图标、偏好设置中心、8 主题与 MarkText 经典功能移植已全部完成并通过全量门禁验证）
 - **工作分支**：主分支
 - **最后验证状态**：`sh manager.sh check` ✅ / `sh manager.sh test` ✅ / `sh manager.sh build` ✅ / `sh check-docs.sh` ✅
 
@@ -21,7 +21,7 @@
 
 ## 当前任务（In Progress）
 
-- （当前无进行中任务，M1 已完成归档。）
+- （当前无进行中任务，M1.5 已完成归档。）
 
 ---
 
@@ -41,7 +41,7 @@
 
 ## 下一步（Next Steps）
 
-1. 用户可通过 `sh manager.sh dev` 启动桌面端应用，或通过 `sh manager.sh web` 在浏览器中预览交互。
+1. 用户可通过 `sh manager.sh dev` 启动桌面端应用，体验无边框多页签标题栏、8 套主题、版心行宽切换、行号水槽、偏好设置弹窗等全部新特性。
 2. 如需开发下一阶段里程碑 M2（剪贴板图片自动转存本地 `assets/`、独立 HTML/PDF 导出），从 `ROADMAP.md` 的 `P1-1` 开始。
 
 ---
@@ -49,7 +49,7 @@
 ## 本任务验证（Verify）
 
 - `sh manager.sh check`（`cargo fmt --check` + `cargo clippy --all-targets -- -D warnings` + `tsc --noEmit` 全部通过）
-- `sh manager.sh test`（8 项 Node 契约测试 + 6 项 Rust 单元测试全部通过）
+- `sh manager.sh test`（Node 契约测试 + Rust 单元测试全部通过）
 - `sh manager.sh build`（前端生产包构建通过）
 - `sh check-docs.sh`（文档体系机械体检 0 错误 0 警告）
 

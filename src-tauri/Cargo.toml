@@ -1,6 +1,6 @@
 [package]
 name = "markleaf"
-version = "0.1.0"  # 版本号唯一出处；tauri.conf.json 省略 version 会回退到这里
+version = "0.2.0"  # 版本号唯一出处；tauri.conf.json 省略 version 会回退到这里
 description = "Fast, beautiful and convenient desktop Markdown reader and editor"
 edition = "2021"
 publish = false

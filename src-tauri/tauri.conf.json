@@ -13,10 +13,11 @@
       {
         "label": "main",
         "title": "MarkLeaf — Markdown Reader & Editor",
-        "width": 1240,
-        "height": 820,
-        "minWidth": 820,
+        "width": 1360,
+        "height": 860,
+        "minWidth": 860,
         "minHeight": 560,
+        "decorations": false,
         "resizable": true,
         "fullscreen": false
       }

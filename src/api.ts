@@ -14,7 +14,9 @@ export type TocItem = {
 
 export type DocStats = {
   chars: number;
+  charsWithSpaces: number;
   words: number;
+  paragraphs: number;
   lines: number;
   readingMinutes: number;
   tasksTotal: number;
@@ -58,7 +60,7 @@ export function isTauriRuntime(): boolean {
 
 export function getAppInfo(): Promise<AppInfo> {
   if (!isTauriRuntime()) {
-    return Promise.resolve({ name: 'MarkLeaf (Web Preview)', version: '0.1.0' });
+    return Promise.resolve({ name: 'MarkLeaf (Web Preview)', version: '0.2.0' });
   }
   return invoke<AppInfo>('app_info');
 }
@@ -143,6 +145,7 @@ function formatInline(text: string): string {
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/~~([^~]+)~~/g, '<del>$1</del>')
     .replace(/==([^=]+)==/g, '<mark class="ml-highlight">$1</mark>')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
 }
@@ -166,6 +169,7 @@ function fallbackRenderInBrowser(markdown: string): RenderedMarkdown {
   const htmlParts: string[] = [];
   let tasksTotal = 0;
   let tasksDone = 0;
+  let paragraphs = 0;
   let inCode = false;
   let codeLang = '';
   let codeLines: string[] = [];
@@ -203,7 +207,7 @@ function fallbackRenderInBrowser(markdown: string): RenderedMarkdown {
       const id = `heading-L${lineNo}`;
       toc.push({ id, text, level, line: lineNo });
       htmlParts.push(
-        `<h${level} id="${id}" data-sourcepos="${lineNo}:1-${lineNo}:${line.length}">${formatInline(text)}</h${level}>`,
+        `<h${level} id="${id}" data-sourcepos="${lineNo}:1-${lineNo}:${line.length}">${formatInline(text)}<button type="button" class="ml-heading-anchor" data-anchor="#${id}" title="复制标题锚点 #${id}">#</button></h${level}>`,
       );
       continue;
     }
@@ -225,11 +229,13 @@ function fallbackRenderInBrowser(markdown: string): RenderedMarkdown {
     }
 
     if (line.trim().length > 0) {
+      paragraphs += 1;
       htmlParts.push(`<p data-sourcepos="${lineNo}:1-${lineNo}:${line.length}">${formatInline(line)}</p>`);
     }
   }
 
   const nonSpaceChars = markdown.replace(/\s+/g, '').length;
+  const charsWithSpaces = markdown.replace(/\r?\n/g, '').length;
   const words = Math.max(1, Math.ceil(nonSpaceChars / 2));
 
   return {
@@ -237,7 +243,9 @@ function fallbackRenderInBrowser(markdown: string): RenderedMarkdown {
     toc,
     stats: {
       chars: nonSpaceChars,
+      charsWithSpaces,
       words,
+      paragraphs: Math.max(1, paragraphs),
       lines: Math.max(1, lines.length),
       readingMinutes: Math.max(1, Math.ceil(words / 320)),
       tasksTotal,

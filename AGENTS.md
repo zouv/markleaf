@@ -162,4 +162,4 @@
 - **轻量改动**：满足第 1、2 条即可。
 - **常规 / 结构性改动**：下面 6 条都满足才算完成：① 代码验证通过；② 只读/只改作用域内文件；③ `ARCHITECTURE.md` 同步；④ `CHANGELOG.md` 记入 `[未发布]`；⑤ `ROADMAP.md` 更新；⑥ `HANDOFF.md` 收尾且 `sh check-docs.sh` 通过。
 
-<!-- vibe-coding-starter 2026-10-31.4 · 文档体系版本标记：初始化时保留，用来判断本项目的规则是否需要随模板升级（变更记录见模板仓库 vibe-coding-starter/README.md） -->
+<!-- vibe-coding-starter 2026-11-10.1 · 文档体系版本标记：初始化时保留，用来判断本项目的规则是否需要随模板升级（变更记录见模板仓库 vibe-coding-starter/README.md） -->

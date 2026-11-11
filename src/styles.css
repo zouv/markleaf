@@ -1312,14 +1312,15 @@ body,
 }
 
 .ml-about-modal {
-  width: 440px;
+  width: 520px;
+  max-width: calc(100vw - 48px);
 }
 
 .ml-about-body {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 20px;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 22px 24px 18px;
 }
 
 .ml-about-logo {
@@ -1327,21 +1328,34 @@ body,
   flex-shrink: 0;
 }
 
-.ml-about-body h4 {
-  margin: 0 0 6px;
-  font-size: 16px;
+.ml-about-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-.ml-about-desc {
-  margin: 0 0 8px;
-  font-size: 13px;
+.ml-about-name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ml-text-main);
+}
+
+.ml-about-version {
+  margin: 6px 0 0;
+  font-size: 12.5px;
   color: var(--ml-text-muted);
 }
 
-.ml-about-meta {
-  margin: 0;
-  font-size: 11.5px;
-  color: var(--ml-text-faint);
+.ml-about-desc {
+  margin: 14px 0 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--ml-text-main);
+}
+
+.ml-modal-footer.ml-about-footer {
+  justify-content: flex-end;
 }
 
 .ml-settings-modal {

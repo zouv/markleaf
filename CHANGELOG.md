@@ -13,6 +13,7 @@
 ## [未发布]
 
 ### 变更
+- 关于弹窗改为「左侧应用图标 + 右侧产品名 / 版本·作者 / 两行简介」，关闭按钮右对齐。
 - 文档体系：同步 vibe-coding-starter 2026-11-10.1（check-docs / skills / hook / .vibe-template）。
 
 ---

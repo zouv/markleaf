@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import appIcon from '../../src-tauri/icons/32x32.png';
+import aboutIcon from '../../src-tauri/icons/128x128.png';
 import { isTauriRuntime } from '../api';
 import Icon from '../ui/Icon';
 
@@ -552,20 +553,20 @@ export default function TitleBar({
               </button>
             </div>
             <div className="ml-modal-body ml-about-body">
-              <img src={appIcon} width={56} height={56} alt="MarkLeaf" className="ml-about-logo" />
-              <div>
-                <h4>MarkLeaf v{appVersion}</h4>
+              <img src={aboutIcon} width={64} height={64} alt="MarkLeaf" className="ml-about-logo" />
+              <div className="ml-about-info">
+                <h4 className="ml-about-name">MarkLeaf</h4>
+                <p className="ml-about-version">版本 {appVersion} · 作者 @zouv</p>
                 <p className="ml-about-desc">
-                  极速、优雅、零格式破坏的桌面 Markdown 阅读与编辑工作台。
-                </p>
-                <p className="ml-about-meta">
-                  内核：Tauri v2 · Rust <code>comrak</code> (CommonMark / GFM) · <code>encoding_rs</code> 多编码无损引擎
+                  极速、优雅、零格式破坏的桌面 Markdown 工作台。
+                  <br />
+                  内核：Tauri v2 · Rust <code>comrak</code> · <code>encoding_rs</code> 多编码引擎
                 </p>
               </div>
             </div>
-            <div className="ml-modal-footer">
+            <div className="ml-modal-footer ml-about-footer">
               <button type="button" className="ml-btn ml-btn-primary" onClick={() => setAboutOpen(false)}>
-                确定
+                关闭
               </button>
             </div>
           </div>

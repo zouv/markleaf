@@ -112,8 +112,8 @@
 - 仅预览前端：`sh manager.sh web`（浏览器打开 Vite 地址；IPC 不可用时自动展示内置演示文档）
 - 测试：`sh manager.sh test`（tsc + node:test 契约测试 + cargo test，三项都跑完再汇总）
 - 交付前检查：`sh manager.sh check`（cargo fmt --check + cargo clippy -D warnings + tsc）
-- 打包：`sh manager.sh package`（`tauri build`；安装包会复制到 `dist/`，首次编译很慢）
-- Windows 资源管理器里双击：`setup.bat` `dev.bat` `build.bat` `test.bat` `package.bat` `clean.bat`
+- 打包：`sh manager.sh package`（`tauri build` + `tauri build --debug`；产物在 `dist/dev` 与 `dist/release`，含 `unpack/`、免安装 zip、安装包与 `SHA256SUMS`；`--skip-build` 复用已有构建，首次编译很慢；运行中的实例会先被检测，`package` 询问确认，`dev` 强制关闭）
+- Windows 资源管理器里双击：`setup.bat` `dev.bat` `build.bat` `test.bat` `package.bat` `clean.bat`（`package.bat` 为纯 cmd 入口，其余经 `_manager.bat` 转交 `manager.sh`）
 
 改代码后至少跑测试或 lint；**文档体检**：改了文档后跑 `sh check-docs.sh`，有 FAIL 时退出码为 1。
 

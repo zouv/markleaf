@@ -65,9 +65,9 @@ cmd_web() {
 
 cmd_build() {
   require_node
-  log "构建前端（tsc --noEmit + vite build，产物 dist/）"
+  log "构建前端（tsc --noEmit + vite build，产物 dist/web/）"
   npm run web:build
-  ok "前端已构建：dist/"
+  ok "前端已构建：dist/web/"
 }
 
 # 全部跑完再汇总：某一项失败时其余照样执行，日志里不会把「没跑」误当成「通过」。
@@ -99,23 +99,8 @@ cmd_check() {
 
 cmd_package() {
   require_node; require_rust
-  log "tauri build（首次会下载依赖并编译，较慢）"
-  npm run desktop:build
-  mkdir -p "${PROJECT_ROOT}/dist"
-  local n=0 f d
-  while IFS= read -r f; do cp "${f}" "${PROJECT_ROOT}/dist/"; n=$((n + 1)); done < <(
-    find "${PROJECT_ROOT}/src-tauri/target/release/bundle" -maxdepth 4 -type f \
-      \( -name '*.msi' -o -name '*.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) 2>/dev/null || true
-  )
-  while IFS= read -r d; do cp -R "${d}" "${PROJECT_ROOT}/dist/"; n=$((n + 1)); done < <(
-    find "${PROJECT_ROOT}/src-tauri/target/release/bundle" -maxdepth 4 -type d -name '*.app' 2>/dev/null || true
-  )
-  if [ "${n}" -eq 0 ]; then
-    warn "没找到安装包（见 src-tauri/target/release/bundle/）"
-  else
-    ok "已复制 ${n} 个产物到 dist/"
-    ls -lh "${PROJECT_ROOT}/dist" | sed 's/^/    /'
-  fi
+  log "打包到 dist/dev 与 dist/release（tauri build + tauri build --debug，首次很慢）"
+  node "${PROJECT_ROOT}/scripts/package.mjs" --pm npm "$@"
 }
 
 # --------------------------------------------------------------------------- #
@@ -148,10 +133,10 @@ markleaf — manager.sh（本项目所有命令的唯一来源）
   setup        首次安装前端依赖（npm ci；没有锁文件时 npm install）
   dev          开发模式：tauri dev（Vite + Rust，热更新）
   web          仅启动 Vite 预览前端（浏览器里，IPC 不可用）
-  build        构建前端到 dist/（tsc --noEmit + vite build）
+  build        构建前端到 dist/web/（tsc --noEmit + vite build）
   test         跑 tsc + node 契约测试 + cargo test（全部跑完再汇总）
   check        cargo fmt --check + cargo clippy -D warnings + tsc
-  package      tauri build 并复制安装包到 dist/（首次很慢）
+  package      出包到 dist/dev（Debug 调试包）与 dist/release（unpack/ + 免安装 zip + 安装包 + SHA256SUMS；--skip-build 复用已有构建）
   clean        清理 dist/、src-tauri/target、.runtime（--all 连 node_modules）
   check-docs   文档体系机械体检（同 sh check-docs.sh）
   help         显示本帮助

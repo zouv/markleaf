@@ -1,12 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MarkLeaf",
+  "mainBinaryName": "MarkLeaf",
   "identifier": "dev.markleaf.app",
   "build": {
     "beforeDevCommand": "npm run web:dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run web:build",
-    "frontendDist": "../dist"
+    "frontendDist": "../dist/web"
   },
   "app": {
     "windows": [

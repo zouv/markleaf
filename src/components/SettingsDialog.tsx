@@ -9,6 +9,7 @@ import {
   type FontFamilyPreset,
   type LineNumbersMode,
   type PageWidthMode,
+  type ThemeId,
   type TrailingNewlinePolicy,
   type ViewMode,
 } from '../settings';
@@ -17,6 +18,7 @@ import Icon from '../ui/Icon';
 interface SettingsDialogProps {
   open: boolean;
   settings: AppSettings;
+  effectiveTheme: ThemeId;
   onSave: (next: AppSettings) => void;
   onClose: () => void;
 }
@@ -31,7 +33,13 @@ const CATEGORIES: ReadonlyArray<{ id: CategoryId; label: string; desc: string }>
   { id: 'shortcuts', label: '快捷键速查', desc: '全局键盘快捷键一览' },
 ];
 
-export default function SettingsDialog({ open, settings, onSave, onClose }: SettingsDialogProps) {
+export default function SettingsDialog({
+  open,
+  settings,
+  effectiveTheme,
+  onSave,
+  onClose,
+}: SettingsDialogProps) {
   const [category, setCategory] = useState<CategoryId>('appearance');
   const [draft, setDraft] = useState<AppSettings>(settings);
 
@@ -60,6 +68,53 @@ export default function SettingsDialog({ open, settings, onSave, onClose }: Sett
     setDraft(next);
     // 实时预览变更并持久化
     onSave(next);
+  };
+
+  const applySettings = (next: AppSettings) => {
+    setDraft(next);
+    onSave(next);
+  };
+
+  const themeMode: 'light' | 'dark' | 'system' = draft.followSystemTheme
+    ? 'system'
+    : (THEME_OPTIONS.find((t) => t.id === draft.theme)?.group ?? 'light');
+
+  const setThemeMode = (mode: 'light' | 'dark' | 'system') => {
+    if (mode === 'system') {
+      applySettings({ ...draft, followSystemTheme: true });
+      return;
+    }
+    applySettings({
+      ...draft,
+      followSystemTheme: false,
+      theme: mode === 'light' ? draft.lightTheme : draft.darkTheme,
+    });
+  };
+
+  const selectTheme = (id: ThemeId) => {
+    const group = THEME_OPTIONS.find((t) => t.id === id)?.group ?? 'light';
+    applySettings({
+      ...draft,
+      followSystemTheme: false,
+      theme: id,
+      ...(group === 'light' ? { lightTheme: id } : { darkTheme: id }),
+    });
+  };
+
+  const updatePreferredTheme = (group: 'light' | 'dark', id: ThemeId) => {
+    if (group === 'light') {
+      applySettings({
+        ...draft,
+        lightTheme: id,
+        ...(themeMode === 'light' ? { theme: id } : {}),
+      });
+    } else {
+      applySettings({
+        ...draft,
+        darkTheme: id,
+        ...(themeMode === 'dark' ? { theme: id } : {}),
+      });
+    }
   };
 
   const handleResetDefaults = () => {
@@ -108,19 +163,42 @@ export default function SettingsDialog({ open, settings, onSave, onClose }: Sett
             {category === 'appearance' && (
               <>
                 <div className="ml-settings-section">
-                  <h4>主题配色 (Theme Gallery)</h4>
+                  <h4>主题模式与配色 (Theme)</h4>
+                  <div className="ml-theme-mode" role="group" aria-label="主题模式">
+                    <button
+                      type="button"
+                      className={themeMode === 'light' ? 'is-active' : ''}
+                      onClick={() => setThemeMode('light')}
+                    >
+                      浅色
+                    </button>
+                    <button
+                      type="button"
+                      className={themeMode === 'dark' ? 'is-active' : ''}
+                      onClick={() => setThemeMode('dark')}
+                    >
+                      深色
+                    </button>
+                    <button
+                      type="button"
+                      className={themeMode === 'system' ? 'is-active' : ''}
+                      onClick={() => setThemeMode('system')}
+                    >
+                      跟随系统
+                    </button>
+                  </div>
                   <p className="ml-settings-note">
-                    精选 8 款印刷级亮色与暗色主题（融合 MarkLeaf 原创与 MarkText 经典主题）。点击即可实时切换：
+                    浅色 / 深色直接应用对应模式的主题，“跟随系统”会随操作系统自动切换。点击下方主题卡可实时预览：
                   </p>
                   <div className="ml-theme-grid">
                     {THEME_OPTIONS.map((t) => {
-                      const active = draft.theme === t.id;
+                      const active = effectiveTheme === t.id;
                       return (
                         <button
                           key={t.id}
                           type="button"
                           className={`ml-theme-card ${active ? 'is-selected' : ''}`}
-                          onClick={() => update('theme', t.id)}
+                          onClick={() => selectTheme(t.id)}
                         >
                           <div
                             className="ml-theme-swatch"
@@ -148,49 +226,40 @@ export default function SettingsDialog({ open, settings, onSave, onClose }: Sett
                 </div>
 
                 <div className="ml-settings-section">
-                  <h4>系统亮暗跟随与窗口显示</h4>
-                  <label className="ml-setting-row">
-                    <div>
-                      <div className="ml-setting-label">跟随操作系统亮/暗模式自动切换</div>
-                      <div className="ml-settings-note">开启后根据系统浅色/深色状态自动应用对应首选主题</div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={draft.followSystemTheme}
-                      onChange={(e) => update('followSystemTheme', e.target.checked)}
-                    />
-                  </label>
-
-                  {draft.followSystemTheme && (
-                    <>
-                      <div className="ml-setting-row">
-                        <span className="ml-setting-label">浅色模式首选主题</span>
-                        <select
-                          value={draft.lightTheme}
-                          onChange={(e) => update('lightTheme', e.target.value as AppSettings['lightTheme'])}
-                        >
-                          {THEME_OPTIONS.filter((t) => t.group === 'light').map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="ml-setting-row">
-                        <span className="ml-setting-label">深色模式首选主题</span>
-                        <select
-                          value={draft.darkTheme}
-                          onChange={(e) => update('darkTheme', e.target.value as AppSettings['darkTheme'])}
-                        >
-                          {THEME_OPTIONS.filter((t) => t.group === 'dark').map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </>
-                  )}
+                  <h4>亮暗首选主题与窗口显示</h4>
+                  <p className="ml-settings-note">
+                    “跟随系统”或切换浅色 / 深色模式时，使用这里指定的首选主题。
+                  </p>
+                  <div className="ml-setting-row">
+                    <span className="ml-setting-label">浅色模式首选主题</span>
+                    <select
+                      value={draft.lightTheme}
+                      onChange={(e) =>
+                        updatePreferredTheme('light', e.target.value as ThemeId)
+                      }
+                    >
+                      {THEME_OPTIONS.filter((t) => t.group === 'light').map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="ml-setting-row">
+                    <span className="ml-setting-label">深色模式首选主题</span>
+                    <select
+                      value={draft.darkTheme}
+                      onChange={(e) =>
+                        updatePreferredTheme('dark', e.target.value as ThemeId)
+                      }
+                    >
+                      {THEME_OPTIONS.filter((t) => t.group === 'dark').map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
                   <div className="ml-setting-row">
                     <div>

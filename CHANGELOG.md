@@ -10,11 +10,26 @@
 
 ---
 
-## [未发布]
+## [0.3.0] - 2026-11-19
+
+### 新增
+- 全新浅绿色系应用图标：浅绿圆角底、奶油书页、深绿叶片与书页左上角的 Markdown `M` 方块；图标源与构建脚本迁到 `docs/icons/`。
+- 支持双击窗口四边单向铺满：双击左 / 右边铺满可用宽度，双击上 / 下边铺满可用高度；包含最外层原生 resize 边框。铺满后拖动窗口会恢复原尺寸，手动缩放则解除铺满状态。
+- 设置中心新增「浅色 / 深色 / 跟随系统」主题模式切换：浅色、深色分别记住首选主题，工具栏主题下拉也会同步更新首选主题。
 
 ### 变更
+- 左上角应用图标菜单改为左侧对齐窗口边缘、上侧对齐图标下边缘。
+- 图标统一由 `docs/icons/markleaf.svg` + `docs/icons/_build.py` 生成 PNG / ICO / ICNS 并安装到 `src-tauri/icons/`；移除旧的 `scripts/generate-icons.mjs`。
+- 打包产物中的可执行文件更名为 `MarkLeaf.exe`（Debug 与 Release 包一致）。
+- 移除工具栏统计胶囊，完整统计明细改为右下角状态栏统计 Tip：悬停查看明细，点击切换统计单位。
+- 打包流程对齐 `vibe-coding-starter` 模板：`package.bat` 改为纯 cmd 入口，与 `sh manager.sh package` 统一调用 `scripts/package.mjs`；同时产出 Debug 免安装 zip（`dist/dev`）与 Release `unpack/`、免安装 zip、安装包和 `SHA256SUMS.txt`（`dist/release`）。
+- 前端构建产物移至 `dist/web`，避免与 `dist/dev`、`dist/release` 打包产物混在一起。
 - 关于弹窗改为「左侧应用图标 + 右侧产品名 / 版本·作者 / 两行简介」，关闭按钮右对齐。
 - 文档体系：同步 vibe-coding-starter 2026-11-10.1（check-docs / skills / hook / .vibe-template）。
+
+### 修复
+- 打包只收集当前版本安装包，不再把历史版本（如 0.1.0）混入 `dist/release`。
+- 设置中心左侧分类导航与主题卡片样式：TSX 类名与 CSS 对齐后，分类不再退化成默认按钮，主题预览色块与说明文字恢复为正常排版。
 
 ---
 

@@ -1,6 +1,6 @@
 [package]
 name = "markleaf"
-version = "0.2.0"  # 版本号唯一出处；tauri.conf.json 省略 version 会回退到这里
+version = "0.3.0"  # 版本号唯一出处；tauri.conf.json 省略 version 会回退到这里
 description = "Fast, beautiful and convenient desktop Markdown reader and editor"
 edition = "2021"
 publish = false
@@ -8,6 +8,10 @@ publish = false
 [lib]
 name = "markleaf_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "MarkLeaf"
+path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -18,6 +22,15 @@ serde = { version = "1", features = ["derive"] }
 comrak = { version = "0.39", default-features = false }
 encoding_rs = "0.8"
 rfd = "0.15"
+
+# 原生边框双击：Tauri 的无边框 resize 子窗口会吞掉最外层边框鼠标事件，
+# 需要在 Windows 上对子窗口做一次最小 Win32 子类化（隔离在 window_edges.rs）。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [lints.rust]
 unsafe_code = "deny"

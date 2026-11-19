@@ -25,6 +25,15 @@
 
 ---
 
+## 🔧 工程化维护（已完成）
+
+- ✅ 打包流程对齐 `vibe-coding-starter/types/desktop-tauri-react`（2026-11-19）：`package.bat` 为纯 cmd 入口，`package.bat` / `manager.sh package` 统一走事务式 Node 出包；产物在 `dist/dev` 与 `dist/release`，前端构建移至 `dist/web`，只收集当前版本安装包。细节见 CHANGELOG [未发布]。
+- ✅ 可执行文件更名与窗口/统计交互调整（2026-11-19）：打包可执行文件改为 `MarkLeaf.exe`；支持双击窗口四边（含最外层原生边框）单向铺满，铺满后拖动窗口恢复原尺寸；统计明细从工具栏胶囊迁移到右下角状态栏统计 Tip。细节见 CHANGELOG [未发布]。
+- ✅ 设置中心排版与亮暗模式（2026-11-19）：修复左侧分类导航与主题卡片样式；新增「浅色 / 深色 / 跟随系统」主题模式切换。细节见 CHANGELOG [未发布]。
+- ✅ 浅绿色系图标重设与 docs/icons 规范（2026-11-19）：新增 SVG 源、PNG/ICO/ICNS 构建脚本与多尺寸输出，并安装到 `src-tauri/icons/`。细节见 CHANGELOG [未发布]。
+
+---
+
 ## 📋 总体开发大纲（按优先级）
 
 ### 🔴 阻塞项（等外部条件）

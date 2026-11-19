@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="ml-title ml-desc">
+  <title id="ml-title">MarkLeaf</title>
+  <desc id="ml-desc">Light mint rounded icon with a cream document, a green leaf and a Markdown M badge.</desc>
+  <!--
+    图标定位：Markdown 文档 + Leaf。
+    - 浅绿圆角底表示「Leaf」与轻盈阅读；
+    - 奶油书页表示 Markdown 文档；
+    - 深绿叶片从书页左下延伸到右上，形成主视觉；
+    - 书页左上角的深绿 M 方块点明 Markdown，随纸张一起轻微倾斜。
+    构图沿用 docs/icons 规范：512 viewBox，图形贴边，圆角外透明。
+  -->
+  <defs>
+    <linearGradient id="ml-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f4fdf8"/>
+      <stop offset="0.55" stop-color="#dff7e8"/>
+      <stop offset="1" stop-color="#bceacf"/>
+    </linearGradient>
+    <linearGradient id="ml-page" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffef9"/>
+      <stop offset="1" stop-color="#f4fbf0"/>
+    </linearGradient>
+    <linearGradient id="ml-leaf" x1="0.15" y1="0.9" x2="0.85" y2="0.1">
+      <stop offset="0" stop-color="#86efac"/>
+      <stop offset="0.48" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#15803d"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 浅绿圆角底 -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#ml-bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="#8fd6ad" stroke-width="8"/>
+  <rect x="34" y="34" width="444" height="444" rx="96" fill="none" stroke="#ffffff" stroke-width="5" opacity="0.7"/>
+
+  <!-- 奶油书页 -->
+  <g transform="rotate(-5 256 280)">
+    <rect x="138" y="82" width="240" height="348" rx="28" fill="url(#ml-page)" stroke="#b6ddc5" stroke-width="7"/>
+    <rect x="152" y="96" width="212" height="320" rx="20" fill="none" stroke="#e2f3e9" stroke-width="4"/>
+    <!-- Markdown M 方块：放在纸张左上角，随纸张一起轻微倾斜 -->
+    <rect x="166" y="112" width="96" height="96" rx="22" fill="#166534"/>
+    <path d="M188 184 V138 L212 162 L236 138 V184" fill="none" stroke="#f2fdf7" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="176" y="244" width="160" height="18" rx="9" fill="#cbead8"/>
+    <rect x="176" y="284" width="132" height="18" rx="9" fill="#d9f0e2"/>
+    <rect x="176" y="324" width="152" height="18" rx="9" fill="#d9f0e2"/>
+    <rect x="176" y="364" width="104" height="18" rx="9" fill="#e3f5ea"/>
+  </g>
+
+  <!-- 深绿叶片：左下到右上 -->
+  <path d="M148 408 C 128 300 208 158 398 94 C 406 250 318 374 148 408 Z" fill="url(#ml-leaf)"/>
+  <path d="M160 398 C 222 304 300 198 386 108" fill="none" stroke="#eafff3" stroke-width="9" stroke-linecap="round" opacity="0.9"/>
+  <g fill="none" stroke="#eafff3" stroke-width="6" stroke-linecap="round" opacity="0.72">
+    <path d="M206 336 C 240 326 272 306 298 278"/>
+    <path d="M258 270 C 294 260 326 238 352 210"/>
+    <path d="M300 220 C 330 210 356 190 376 164"/>
+  </g>
+</svg>

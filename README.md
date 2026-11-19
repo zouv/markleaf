@@ -16,7 +16,7 @@
 ```bash
 sh manager.sh setup   # 安装前端依赖（npm ci）
 sh manager.sh dev     # tauri dev：Vite + Rust，改前端热更新；Ctrl-C 退出
-sh manager.sh package # 生产打包，安装包复制到 dist/
+sh manager.sh package # 出包到 dist/dev 与 dist/release（首次很慢）
 ```
 
 只想预览界面、不跑 Rust：`sh manager.sh web`（浏览器打开 Vite 地址，自动加载内置全语法演示文档）。
@@ -30,23 +30,23 @@ sh manager.sh package # 生产打包，安装包复制到 dist/
 | `setup` | 首次安装前端依赖（`npm ci`；没有锁文件时 `npm install`） |
 | `dev` | 开发模式：`tauri dev`（Vite + Rust，热更新） |
 | `web` | 仅启动 Vite 预览前端（浏览器里，IPC 不可用） |
-| `build` | 构建前端到 `dist/`（`tsc --noEmit` + `vite build`） |
+| `build` | 构建前端到 `dist/web/`（`tsc --noEmit` + `vite build`） |
 | `test` | 跑 tsc + node 契约测试 + cargo test（全部跑完再汇总） |
 | `check` | `cargo fmt --check` + `cargo clippy -D warnings` + tsc |
-| `package` | `tauri build` 并复制安装包到 `dist/`（首次很慢） |
+| `package` | 出包到 `dist/dev`（Debug 调试包）与 `dist/release`（`unpack/` + 免安装 zip + 安装包 + SHA256SUMS；首次很慢；`--skip-build` 复用已有构建） |
 | `clean` | 清理 `dist/`、`src-tauri/target`、`.runtime`（`--all` 连 `node_modules`） |
 | `check-docs` | 文档体系机械体检（同 `sh check-docs.sh`） |
 | `help` | 显示帮助 |
 
 ## 双击脚本（Windows）
 
-根目录的 `.bat` 是资源管理器里双击用的快捷入口，经 `_manager.bat` 定位 Git Bash 后转交 `manager.sh`（不含逻辑）：
+根目录的 `.bat` 是资源管理器里双击用的快捷入口：`package.bat` 是纯 cmd 入口，直接调用 Node 出包脚本（无需 Git Bash）；其余脚本经 `_manager.bat` 定位 Git Bash 后转交 `manager.sh`（不含逻辑）：
 
 | 脚本 | 作用 |
 |---|---|
 | `setup.bat` | 安装前端依赖 |
 | `dev.bat` | 启动 `tauri dev`（Ctrl+C 停止）；若应用正在运行会先强制关闭 |
-| `build.bat` | 构建前端到 `dist/` |
+| `build.bat` | 构建前端到 `dist/web/` |
 | `test.bat` | 跑全部测试 |
 | `package.bat` | 出包到 `dist/dev` 与 `dist/release`（纯 cmd，无需 Git Bash）；若应用正在运行会先询问是否强制关闭 |
 | `clean.bat` | 清理构建产物 |
@@ -81,7 +81,9 @@ src-tauri/                  # Rust 后端与 Tauri 配置
   tauri.conf.json           # 窗口 / CSP / 打包 / identifier / devUrl
   icons/                    # 应用图标
 tests/contract.test.mjs     # node:test：配置与 IPC 契约校验
-dist/                       # 前端构建产物与复制出的安装包（不入库）
+scripts/                    # package.mjs / package-lib.mjs：出包、zip、SHA256 与事务发布；process-guard.mjs
+docs/icons/                 # 图标 SVG 源、PNG/ICO/ICNS 构建脚本与输出
+dist/                       # 前端产物在 dist/web；打包产物在 dist/dev 与 dist/release（不入库）
 manager.sh                  # 统一管理脚本（所有命令的唯一来源）
 *.bat                       # Windows 双击入口（_manager.bat 是共用部分）
 docs/                       # 使用/维护文档（面向人）
@@ -95,8 +97,9 @@ HANDOFF.md                  # 会话接力（进行中状态）
 ## 约定
 
 - **版本号**只在 `src-tauri/Cargo.toml` 的 `version`；`tauri.conf.json` 不写 `version`，前端经 `app_info` 命令读取。
+- **可执行文件名**：`tauri.conf.json` 的 `mainBinaryName` 为 `MarkLeaf`，打包后的可执行文件为 `MarkLeaf.exe`（Windows）。
 - **App 标识**在 `src-tauri/tauri.conf.json` 的 `identifier`（`dev.markleaf.app`），发布后不可改。
-- **图标**是占位图：`npm run tauri icon path/to/icon.png`（1024×1024）会重写 `src-tauri/icons/`。
+- **图标**：唯一矢量源是 `docs/icons/markleaf.svg`；改完执行 `python docs/icons/_build.py`，会重新生成 `docs/icons/` 下的 PNG / ICO / ICNS 并安装到 `src-tauri/icons/`。不要手改生成文件或尺寸；详见 `docs/icons/README.md`。
 - **IPC 契约**由 `tests/contract.test.mjs` 校验：Rust 命令、`generate_handler!` 注册、前端 `invoke` 必须三方一致。
 
 > AI 协作说明：本项目采用一套「AI 协作文档体系」，AI 代理开工请先读 [`AGENTS.md`](./AGENTS.md)。

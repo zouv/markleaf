@@ -47,7 +47,8 @@ src/App.tsx (React 18 多页签读写工作台)
 | 加 / 改 IPC 命令 | `src-tauri/src/commands.rs`、`src-tauri/src/lib.rs`、`src/api.ts`、`tests/contract.test.mjs` | `src/styles.css`、窗口配置 | §2.2 |
 | 改 Markdown 解析 / 大纲 / 任务勾选 | `src-tauri/src/markdown.rs`、`src-tauri/src/commands.rs` | 前端样式、打包脚本 | §2.3 |
 | 改文件读写 / 编码识别 / 目录列表 | `src-tauri/src/fs_ops.rs`、`src-tauri/src/commands.rs` | `src-tauri/src/markdown.rs`、前端样式 | §2.4 |
-| 改窗口 / 权限 / CSP / 图标生成 | `src-tauri/tauri.conf.json`、`src-tauri/capabilities/default.json`、`scripts/generate-icons.mjs` | 业务代码 | §6 |
+| 改窗口 / 权限 / CSP / 图标生成 | `src-tauri/tauri.conf.json`、`src-tauri/capabilities/default.json`、`docs/icons/markleaf.svg`、`docs/icons/_build.py` | 业务代码 | §6 |
+| 改打包 / 出包流程 | `scripts/package.mjs`、`scripts/package-lib.mjs`、`package.bat`、`manager.sh`、`package.json`、`vite.config.ts`、`src-tauri/tauri.conf.json`、`tests/contract.test.mjs` | 业务代码、前端样式 | §6 |
 
 ---
 
@@ -57,15 +58,18 @@ src/App.tsx (React 18 多页签读写工作台)
 |---|---|---|
 | `src/main.tsx` | React 18 挂载入口，加载 `App.tsx` 与 `styles.css` | 几乎不改 |
 | `src/App.tsx` | 主工作台容器：管理多页签文档栈（`DocTabState[]`）、工具栏分组簇、左侧同级文件树、中央编辑器（含行号水槽与 2D 网格建表器）+ 阅读区、右侧 TOC、自动保存与图片灯箱 | 改多页签状态、工具栏、阅读/编辑联动、快捷键 |
-| `src/components/TitleBar.tsx` | 无边框一体式自定义标题栏：左上角 MarkLeaf 图标下拉菜单、支持指针捕获拖拽重排与中键关闭的多页签栏、关于弹窗、右侧原生窗口控制按钮 | 改标题栏、页签拖拽交互、页签右键菜单 |
+| `src/components/TitleBar.tsx` | 无边框一体式自定义标题栏：左上角 MarkLeaf 图标下拉菜单、支持指针捕获拖拽重排与中键关闭的多页签栏、窗口四边双击单向铺满、关于弹窗、右侧原生窗口控制按钮 | 改标题栏、页签拖拽交互、页签右键菜单、窗口边缘铺满 |
 | `src/components/SettingsDialog.tsx` | 双栏偏好设置模态框：涵盖「外观与主题、阅读排版、编辑器、文件与大纲、快捷键速查」5 大分类及恢复默认设置 | 新增或调整偏好设置项 UI |
 | `src/settings.ts` | 偏好设置类型定义、8 套精选主题元数据、5 档版心行宽映射、字体栈预设、`localStorage` 读写与保存前文本尾部换行/EOL 规范化函数 | 新增配置字段、主题或默认值 |
 | `src/ui/Icon.tsx` | 零依赖 SVG 矢量图标组件（33 个语义化图标） | 新增工具栏或菜单图标 |
 | `src/api.ts` | 前端唯一 IPC 调用层：封装全部 `invoke<...>('...')` 命令及浏览器预览模式（`web`）下的本地降级兜底 | 新增 / 修改 IPC 接口或类型定义 |
 | `src/demoDoc.ts` | 内置欢迎与全语法演示文档 | 调整默认演示内容 |
 | `src/styles.css` | 全局 UI 样式与 8 套 `.ml-prose` 印刷级主题（Paper / GitHub / Sepia / Solarized Light / Night / One Dark / Nord / Catppuccin Mocha） | 调排版美观度、主题配色、标题栏、行号水槽、弹窗样式 |
-| `scripts/generate-icons.mjs` | 纯 Node.js 零依赖矢量光栅化图标生成器，生成 MarkLeaf 翠绿叶片 + 书页 `M` 徽章的多尺寸 PNG / ICO / ICNS 图标 | 重新设计或更新应用图标时 |
+| `docs/icons/markleaf.svg` + `docs/icons/_build.py` | 图标唯一矢量源（512 viewBox）与构建脚本：无头 Edge 渲染、洋红抠图、生成 PNG / ICO / ICNS 并安装到 `src-tauri/icons/` | 重新设计图标或调整导出尺寸时 |
+| `scripts/package.mjs` + `scripts/package-lib.mjs` | 零第三方依赖出包脚本：release/debug 构建、unpack 目录、zip、manifest、SHA256 与事务发布到 `dist/dev`、`dist/release` | 改打包流程、产物布局、校验方式 |
+| `scripts/process-guard.mjs` | 检测运行中的 MarkLeaf：`dev` 直接强制关闭；`package` 列出进程并询问 Y 后才关闭（非交互环境需 `MARKLEAF_FORCE_CLOSE=1`） | 改运行中实例处理、打包冲突提示 |
 | `src-tauri/src/lib.rs` | Tauri 应用入口与 `generate_handler!` 命令注册表 | 新增或删除 Tauri 命令时 |
+| `src-tauri/src/window_edges.rs` | Windows 原生边框双击：子类化主窗口与 Tauri resize 子窗口，把 `WM_NCLBUTTONDBLCLK` 转成 `window-edge-fill` 事件（unsafe 隔离在此模块） | 改窗口原生边框 / 双击行为时 |
 | `src-tauri/src/commands.rs` | `#[tauri::command]` 门面函数，连接 `markdown.rs` 与 `fs_ops.rs` | 新增或修改 IPC 命令签名 |
 | `src-tauri/src/markdown.rs` | 基于 `comrak` 的 GFM + Alerts + TaskList + Footnotes + Math + `data-sourcepos` 渲染器、标题 `#slug` 锚点注入、TOC 提取、4 维字数统计与任务复选框行级写回 | 改 Markdown 语法支持、HTML 结构、大纲提取、复选框写回逻辑 |
 | `src-tauri/src/fs_ops.rs` | CLI 启动路径提取、编码无损读写（UTF-8 / BOM / UTF-16 / GBK）、同目录 `.md` 文件列举、原生打开/保存文件对话框 | 改文件打开保存、编码探测、同级目录树扫描 |
@@ -87,6 +91,9 @@ src/App.tsx (React 18 多页签读写工作台)
 | 编辑器括号/引号/Markdown 符号自动配对 | `handleEditorKeyDown` (`PAIR_MAP`) | 根据 `autoPairBracket` / `autoPairQuote` / `autoPairMarkdown` 设置自动补全或包裹选区 |
 | 可视化 2D 网格建表器与多格式复制（富文本/HTML/MD） | `insertGridTable` / `handleCopyRichText` | 鼠标悬停选择 M×N 行列插入 GFM 表格；使用 `ClipboardItem` 写入 `text/html` 富文本 |
 | 8 套主题与跟随系统亮暗切换 | `THEME_OPTIONS` / `effectiveTheme` | 在 `document.documentElement` 上同步 `data-theme`，CSS 变量定义在 `src/styles.css` |
+| 双击窗口四边单向铺满 | `fillWindowFromEdge` / `EDGE_FILL_THRESHOLD` / `singleFillRef` | 内层由 JS 捕获；最外层原生 resize 边框由 `window_edges.rs` 子类化后发 `window-edge-fill`；铺满时记录原始范围，用户拖动窗口（`onMoved`）恢复原尺寸，手动缩放（`onResized`）直接解除 |
+| 底部状态栏统计 Tip（点击切换单位 / 悬停明细） | `statsBadgeText` / `cycleStatsUnit` / `statsTipOpen` | 统计明细卡片已从工具栏移到右下角状态栏，`.ml-stats-popover.is-up` 向上展开 |
+| 设置中心主题模式与排版 | `themeMode` / `setThemeMode` / `selectTheme` | 浅色 / 深色映射到 `lightTheme` / `darkTheme`，`followSystemTheme` 表示跟随系统；CSS 类为 `.ml-settings-cat`、`.ml-settings-panel`、`.ml-theme-swatch-surface` |
 
 ### 2.2 IPC 契约层（`src-tauri/src/commands.rs`、`src/api.ts`）
 
@@ -122,7 +129,7 @@ src/App.tsx (React 18 多页签读写工作台)
 
 ### 3.1 双击 `.md` 极速首屏直出链路
 
-- **需求语义**：用户在资源管理器双击 `.md` 或通过命令行 `markleaf README.md` 启动时，首屏不等多次往返 IPC，一次调用直接拿到完整 HTML、TOC、统计与同级文件树。
+- **需求语义**：用户在资源管理器双击 `.md` 或通过命令行 `MarkLeaf README.md` 启动时，首屏不等多次往返 IPC，一次调用直接拿到完整 HTML、TOC、统计与同级文件树。
 - **关键坑**：MarkText 需要等 Electron 主进程启动 → 渲染进程加载庞大 Vue/Muya Bundle → 多轮 IPC 请求文件 → 前端 JS 解析构造 Block 树，耗时 1.5s~3s。
 - **正确实现**：Rust 在 `startup_document` 中直接解析 `std::env::args_os()`，发现合法 `.md` 路径即在同一函数内完成 `fs::read` + `decode_bytes_lossless` + `render_markdown_payload` + `list_sibling_markdown_files` 并一次性返回 `DocumentSession`（涉及函数：`startup_document`、`load_document_from_path`）。
 - **调用链**：`OS Args` → `commands::startup_document` → `fs_ops::extract_cli_markdown_path` → `fs_ops::load_document_from_path` → `markdown::render_markdown_payload` → `api::getStartupDocument` → `App.tsx`。
@@ -157,7 +164,7 @@ src/App.tsx (React 18 多页签读写工作台)
 | 区段 | 注释锚点（搜这个） | 内容 |
 |---|---|---|
 | 主题变量表 | `/* === [SECTION: THEMES] === */` | Paper、GitHub、Sepia、Solarized Light、Night、One Dark、Nord、Catppuccin Mocha 共 8 套亮/暗主题 CSS 变量 |
-| 工作台壳体布局 | `/* === [SECTION: WORKBENCH] === */` | 无边框一体式标题栏与多页签栏、分组簇主工具栏、字数统计胶囊悬浮窗、三栏弹性工作区 |
+| 工作台壳体布局 | `/* === [SECTION: WORKBENCH] === */` | 无边框一体式标题栏与多页签栏、分组簇主工具栏、底部统计 Tip 与悬停明细卡片、三栏弹性工作区 |
 | 印刷级正文排版 | `/* === [SECTION: PROSE] === */` | `.ml-prose` 5 档版心行宽、标题与 `#` 锚点按钮、GitHub Alerts、任务列表、代码块行号与折行、专注模式样式 |
 | 便捷编辑器与模态框 | `/* === [SECTION: EDITOR] === */` | 格式化工具条、2D 网格建表选择器、同步滚动行号水槽、双栏偏好设置弹窗与图片灯箱样式 |
 
@@ -169,10 +176,15 @@ src/App.tsx (React 18 多页签读写工作台)
 > 具体操作步骤以 [`docs/02-使用说明.md`](docs/02-使用说明.md) 为准。
 
 - **命令唯一来源**：`manager.sh`（`setup / dev / web / build / test / check / package / clean / check-docs`）；改命令先改它，再同步 README 与 AGENTS §4。
-- **双击脚本**：根目录 `setup.bat dev.bat build.bat test.bat package.bat clean.bat` 经 `_manager.bat` 转交 `manager.sh`。
+- **双击脚本**：根目录 `setup.bat dev.bat build.bat test.bat package.bat clean.bat`；`package.bat` 是纯 cmd 入口，直接调用 `scripts/package.mjs`（无需 Git Bash），其余经 `_manager.bat` 转交 `manager.sh`。`dev` 会先强制关闭运行中的实例，`package` 会列出进程并询问 Y 后才关闭。
 - **版本号**：只在 `src-tauri/Cargo.toml` 的 `version`；`tauri.conf.json` 省略 `version`；`package.json` 固定 `0.0.0`。
+- **可执行文件名**：`tauri.conf.json` 的 `mainBinaryName` 为 `MarkLeaf`；`scripts/package.mjs` 用该名称从 `target/<profile>/MarkLeaf.exe` 收集可执行文件，打包产物与 zip 内文件名一致。
 - **App 标识**：`src-tauri/tauri.conf.json` 的 `identifier`（`dev.markleaf.app`）。
-- **无边框窗口与权限**：`tauri.conf.json` 中 `decorations: false`，`src-tauri/capabilities/default.json` 中显式声明 `core:window:allow-minimize`、`core:window:allow-toggle-maximize`、`core:window:allow-close`、`core:window:allow-start-dragging`。
+- **无边框窗口与权限**：`tauri.conf.json` 中 `decorations: false`，`src-tauri/capabilities/default.json` 中显式声明 `core:window:allow-minimize`、`core:window:allow-toggle-maximize`、`core:window:allow-close`、`core:window:allow-start-dragging`、`core:window:allow-current-monitor`、`core:window:allow-inner-size`、`core:window:allow-outer-position`、`core:window:allow-set-size`、`core:window:allow-set-position`。
+- **出包产物**：前端在 `dist/web`（`tauri.conf.json` 的 `frontendDist` 指向 `../dist/web`）；`package` 运行 `tauri build` + `tauri build --debug`，Debug 包打成 `dist/dev/<Product>_<版本>_<平台>-unpack-debug.zip`，Release 可执行文件 / `.app` 放入 `dist/release/unpack/`，安装包放 `dist/release/`，并生成 `SHA256SUMS.txt` 与 `unpack-manifest.json`。
+- **打包事务与版本过滤**：`scripts/package.mjs` 先写 `.runtime/staging`，再用 `publishPackageSet` 原子替换 `dist/dev`、`dist/release`（失败回滚）；`collectInstallers` 只收集与 `Cargo.toml` 版本一致的安装包，避免历史版本混入。
+- **图标**：唯一矢量源是 `docs/icons/markleaf.svg`；执行 `python docs/icons/_build.py` 生成 PNG / ICO / ICNS 并安装到 `src-tauri/icons/`。不要手改生成文件或尺寸。
+- **原生边框双击**：`window_edges.rs` 在 Windows setup 时子类化主窗口与 `TAURI_DRAG_RESIZE_BORDERS` 子窗口；命中边框后发 `window-edge-fill`，由 `TitleBar.tsx` 统一调用 `fillWindowFromEdge` 处理。子类化失败时内层 JS 边缘处理仍然可用。
 
 ---
 
@@ -181,3 +193,12 @@ src/App.tsx (React 18 多页签读写工作台)
 - **`tests/contract.test.mjs` 的正则匹配约束**：契约测试通过正则 `/#\[tauri::command\][\s\S]*?pub (?:async )?fn (\w+)/g` 扫描 `src-tauri/src/commands.rs`，并扫描 `src/api.ts` 中的 `/invoke<[^>]+>\('([^']+)'(?:,|\))/g`。因此**所有 Tauri 命令必须定义在 `commands.rs` 中，且 `src/api.ts` 中每个命令调用必须写成单行 `invoke<ReturnType>('cmd_name', ...)` 形式**。
 - **禁止引入 `@tauri-apps/plugin-*` npm 包**：`tests/contract.test.mjs` 明确断言 `package.json` 不含 `@tauri-apps/plugin-*` 且 `capabilities/default.json` 只含 `core:*` 权限。因此文件打开/保存对话框直接在 Rust 侧用轻量 `rfd` crate 实现并走自有 IPC 命令，无边框窗口控制使用 `@tauri-apps/api/window` 内置的 `core:window:*` 权限。
 - **不破坏原文件格式铁律**：阅读态勾选复选框绝不能用 AST 序列化回写全文，必须走 `markdown::toggle_task_at_line` 按行号原位替换，保留原文件全部空行、缩进与换行符（CRLF/LF）。
+- **打包产物目录不能混用**：Vite `outDir` 必须是 `dist/web`，否则前端产物会和 `dist/dev`、`dist/release` 互相覆盖；契约测试会校验 `frontendDist` 与 `outDir`。
+- **历史安装包会残留**：Tauri 打包不会清理 `src-tauri/target/release/bundle/` 里的旧版本文件，`package.mjs` 必须按当前 `Cargo.toml` 版本过滤，否则旧版安装包会被一起发布。
+- **窗口单向铺满必须用物理像素**：`currentMonitor().workArea`、`innerSize()`、`outerPosition()` 都是物理像素，`setSize` / `setPosition` 也传 `PhysicalSize` / `PhysicalPosition`；不要用 `screen.availWidth` 或逻辑像素混算，否则 HiDPI / 多显示器会偏。
+- **原生 resize 边框会吞掉最外层双击**：Tauri 的无边框 resize 子窗口覆盖最外侧边框，DOM 收不到；`window_edges.rs` 必须同时子类化主窗口与 `TAURI_DRAG_RESIZE_BORDERS` 子窗口，只挂一处会出现某些边双击无效（本次左 / 右 / 上失效、下有效即此原因）。
+- **单向铺满要记录原始范围并区分自身事件**：铺满前把 `innerSize` / `outerPosition` 存进 `singleFillRef`；`onMoved` / `onResized` 会因 `setSize` / `setPosition` 自身触发，必须用 `fillTargetRef` 比对目标尺寸/位置，否则铺满瞬间会被误判为用户拖拽而立即还原。
+- **设置弹窗类名必须与 `SettingsDialog.tsx` 对齐**：曾出现 TSX 使用 `.ml-settings-cat` / `.ml-settings-panel` / `.ml-theme-swatch-surface`，CSS 仍是 `.ml-settings-nav-item` / `.ml-settings-content` / `.ml-theme-swatch-page`，导致左侧分类退化成默认按钮、主题预览空白；改类名时两处同步。
+- **图标构建依赖无头 Edge**：`docs/icons/_build.py` 用 Edge 渲染 SVG 后把洋红背景抠成透明；找不到 Edge 时设置 `MARKLEAF_EDGE`。PNG / ICO / ICNS 是二进制，不要改成 Git LFS 指针。
+- **统计明细卡片唯一入口在右下角**：工具栏不再放统计胶囊，底部 `.ml-stats-status` 悬停展开 `.ml-stats-popover.is-up`，点击切换 `statsUnit`；不要再在别处复制一份统计行。
+- **打包前先关闭正在运行的 MarkLeaf**：Tauri 需要替换 `target/<profile>/MarkLeaf.exe`，Windows 会锁定正在运行的可执行文件。`scripts/process-guard.mjs` 会在打包前检测：`package` 列出进程并询问 Y（非交互环境需 `MARKLEAF_FORCE_CLOSE=1`），`dev` 直接强制关闭；绕过脚本直接 `tauri build` 时仍需手动退出，否则报「拒绝访问 (os error 5)」。

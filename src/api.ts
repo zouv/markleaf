@@ -60,7 +60,7 @@ export function isTauriRuntime(): boolean {
 
 export function getAppInfo(): Promise<AppInfo> {
   if (!isTauriRuntime()) {
-    return Promise.resolve({ name: 'MarkLeaf (Web Preview)', version: '0.2.0' });
+    return Promise.resolve({ name: 'MarkLeaf (Web Preview)', version: '0.3.0' });
   }
   return invoke<AppInfo>('app_info');
 }

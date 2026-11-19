@@ -1,9 +1,28 @@
-import { useEffect, useRef, useState } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
+import {
+  PhysicalPosition,
+  PhysicalSize,
+  currentMonitor,
+  getCurrentWindow,
+} from '@tauri-apps/api/window';
 import appIcon from '../../src-tauri/icons/32x32.png';
 import aboutIcon from '../../src-tauri/icons/128x128.png';
 import { isTauriRuntime } from '../api';
 import Icon from '../ui/Icon';
+
+type WindowEdge = 'left' | 'right' | 'top' | 'bottom';
+
+const EDGE_FILL_THRESHOLD = 12;
+const DRAG_RESTORE_THRESHOLD = 4;
+
+function isTitlebarDragTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (!target.closest('[data-tauri-drag-region]')) return false;
+  return !target.closest(
+    'button, a, input, select, textarea, label, [role="tab"], .ml-tab, .ml-window-controls, .ml-title-app-btn',
+  );
+}
 
 export interface DocTabSummary {
   id: string;
@@ -70,6 +89,50 @@ export default function TitleBar({
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const tabRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  // 单向铺满前的原始窗口范围；用户拖拽/缩放窗口时用它恢复原尺寸。
+  const singleFillRef = useRef<{ size: PhysicalSize; position: PhysicalPosition } | null>(null);
+  const fillTargetRef = useRef<{ size: PhysicalSize; position: PhysicalPosition } | null>(null);
+  const applyingFillRef = useRef(false);
+  const fillTimerRef = useRef<number | null>(null);
+
+  const scheduleFillSettle = useCallback(() => {
+    applyingFillRef.current = true;
+    if (fillTimerRef.current !== null) window.clearTimeout(fillTimerRef.current);
+    fillTimerRef.current = window.setTimeout(() => {
+      applyingFillRef.current = false;
+      fillTimerRef.current = null;
+    }, 500);
+  }, []);
+
+  const fillWindowFromEdge = useCallback(
+    async (edge: WindowEdge) => {
+      const win = getCurrentWindow();
+      if (await win.isMaximized()) await win.unmaximize();
+      const monitor = await currentMonitor();
+      if (!monitor) return;
+      const size = await win.innerSize();
+      const position = await win.outerPosition();
+      if (!singleFillRef.current) {
+        singleFillRef.current = { size, position };
+      }
+
+      const workArea = monitor.workArea;
+      let targetSize: PhysicalSize;
+      let targetPosition: PhysicalPosition;
+      if (edge === 'left' || edge === 'right') {
+        targetSize = new PhysicalSize(workArea.size.width, size.height);
+        targetPosition = new PhysicalPosition(workArea.position.x, position.y);
+      } else {
+        targetSize = new PhysicalSize(size.width, workArea.size.height);
+        targetPosition = new PhysicalPosition(position.x, workArea.position.y);
+      }
+      fillTargetRef.current = { size: targetSize, position: targetPosition };
+      scheduleFillSettle();
+      await win.setSize(targetSize);
+      await win.setPosition(targetPosition);
+    },
+    [scheduleFillSettle],
+  );
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -78,7 +141,16 @@ export default function TitleBar({
     void win.isMaximized().then(setMaximized).catch(() => {});
     void win
       .onResized(() => {
-        void win.isMaximized().then(setMaximized).catch(() => {});
+        void win
+          .isMaximized()
+          .then((isMaximized) => {
+            setMaximized(isMaximized);
+            if (isMaximized) {
+              singleFillRef.current = null;
+              fillTargetRef.current = null;
+            }
+          })
+          .catch(() => {});
       })
       .then((fn) => {
         unlisten = fn;
@@ -88,6 +160,202 @@ export default function TitleBar({
       if (unlisten) unlisten();
     };
   }, []);
+
+  // 参考 Windows：铺满后继续拖动窗口时恢复原尺寸；手动缩放则直接解除铺满状态。
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const win = getCurrentWindow();
+    let unlistenMoved: (() => void) | undefined;
+    let unlistenResized: (() => void) | undefined;
+
+    void win
+      .onMoved(({ payload: position }) => {
+        if (applyingFillRef.current) {
+          const target = fillTargetRef.current;
+          if (
+            target &&
+            Math.abs(position.x - target.position.x) <= 2 &&
+            Math.abs(position.y - target.position.y) <= 2
+          ) {
+            return;
+          }
+        }
+        const saved = singleFillRef.current;
+        if (!saved) return;
+        singleFillRef.current = null;
+        fillTargetRef.current = null;
+        scheduleFillSettle();
+        void win
+          .setSize(saved.size)
+          .then(() => win.setPosition(position))
+          .catch(() => {})
+          .finally(() => {
+            applyingFillRef.current = false;
+          });
+      })
+      .then((fn) => {
+        unlistenMoved = fn;
+      })
+      .catch(() => {});
+
+    void win
+      .onResized(({ payload: size }) => {
+        if (applyingFillRef.current) {
+          const target = fillTargetRef.current;
+          if (
+            target &&
+            Math.abs(size.width - target.size.width) <= 2 &&
+            Math.abs(size.height - target.size.height) <= 2
+          ) {
+            return;
+          }
+        }
+        singleFillRef.current = null;
+        fillTargetRef.current = null;
+      })
+      .then((fn) => {
+        unlistenResized = fn;
+      })
+      .catch(() => {});
+
+    return () => {
+      if (unlistenMoved) unlistenMoved();
+      if (unlistenResized) unlistenResized();
+      if (fillTimerRef.current !== null) {
+        window.clearTimeout(fillTimerRef.current);
+        fillTimerRef.current = null;
+      }
+    };
+  }, [scheduleFillSettle]);
+
+  // 参考 Windows：铺满后从标题栏开始拖动时，先恢复原尺寸，再进入原生窗口拖动。
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let pendingCleanup: (() => void) | null = null;
+
+    const onMouseDown = (event: MouseEvent) => {
+      if (event.button !== 0 || event.detail !== 1) return;
+      if (!singleFillRef.current || !isTitlebarDragTarget(event.target)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const startX = event.screenX;
+      const startY = event.screenY;
+      let settled = false;
+
+      const cleanup = () => {
+        window.removeEventListener('mousemove', onMouseMove, true);
+        window.removeEventListener('mouseup', onMouseUp, true);
+        pendingCleanup = null;
+      };
+
+      const restoreAndDrag = (moveEvent: MouseEvent) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        const saved = singleFillRef.current;
+        singleFillRef.current = null;
+        fillTargetRef.current = null;
+        void (async () => {
+          const win = getCurrentWindow();
+          try {
+            if (saved) {
+              const [currentPosition, currentSize] = await Promise.all([
+                win.outerPosition(),
+                win.innerSize(),
+              ]);
+              const relX =
+                currentSize.width > 0
+                  ? (moveEvent.screenX - currentPosition.x) / currentSize.width
+                  : 0.5;
+              const relY =
+                currentSize.height > 0
+                  ? (moveEvent.screenY - currentPosition.y) / currentSize.height
+                  : 0.5;
+              await win.setSize(saved.size);
+              await win.setPosition(
+                new PhysicalPosition(
+                  Math.round(moveEvent.screenX - relX * saved.size.width),
+                  Math.round(moveEvent.screenY - relY * saved.size.height),
+                ),
+              );
+            }
+            await win.startDragging();
+          } catch {
+            // 恢复失败时保持当前窗口，不影响后续操作。
+          }
+        })();
+      };
+
+      const onMouseMove = (moveEvent: MouseEvent) => {
+        if (
+          Math.hypot(moveEvent.screenX - startX, moveEvent.screenY - startY) <
+          DRAG_RESTORE_THRESHOLD
+        ) {
+          return;
+        }
+        restoreAndDrag(moveEvent);
+      };
+      const onMouseUp = () => {
+        settled = true;
+        cleanup();
+      };
+
+      window.addEventListener('mousemove', onMouseMove, true);
+      window.addEventListener('mouseup', onMouseUp, true);
+      pendingCleanup = () => {
+        settled = true;
+        cleanup();
+      };
+    };
+
+    window.addEventListener('mousedown', onMouseDown, true);
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown, true);
+      if (pendingCleanup) pendingCleanup();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const onEdgeDoubleClick = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      const edges: Array<{ edge: WindowEdge; distance: number }> = [
+        { edge: 'left', distance: event.clientX },
+        { edge: 'right', distance: window.innerWidth - event.clientX },
+        { edge: 'top', distance: event.clientY },
+        { edge: 'bottom', distance: window.innerHeight - event.clientY },
+      ];
+      edges.sort((a, b) => a.distance - b.distance);
+      const closest = edges[0];
+      if (!closest || closest.distance > EDGE_FILL_THRESHOLD) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void fillWindowFromEdge(closest.edge).catch(() => {});
+    };
+    window.addEventListener('dblclick', onEdgeDoubleClick, true);
+    return () => window.removeEventListener('dblclick', onEdgeDoubleClick, true);
+  }, [fillWindowFromEdge]);
+
+  // Windows 原生 resize 边框会吞掉最外层双击，由 Rust 侧窗口子类化转发此事件。
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    void listen<string>('window-edge-fill', (event) => {
+      const edge = event.payload;
+      if (edge === 'left' || edge === 'right' || edge === 'top' || edge === 'bottom') {
+        void fillWindowFromEdge(edge).catch(() => {});
+      }
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [fillWindowFromEdge]);
 
   useEffect(() => {
     if (!appMenuPos && !tabMenu) return;
@@ -121,6 +389,8 @@ export default function TitleBar({
 
   const handleToggleMaximize = () => {
     if (!isTauriRuntime()) return;
+    singleFillRef.current = null;
+    fillTargetRef.current = null;
     void getCurrentWindow().toggleMaximize();
   };
 
@@ -226,7 +496,7 @@ export default function TitleBar({
           title="MarkLeaf 菜单"
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
-            setAppMenuPos({ x: rect.left + 4, y: rect.bottom + 4 });
+            setAppMenuPos({ x: 0, y: rect.bottom });
           }}
         >
           <img src={appIcon} width={20} height={20} alt="MarkLeaf" draggable={false} />

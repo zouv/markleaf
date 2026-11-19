@@ -18,6 +18,10 @@ test('identifier：反向域名形式，且不是 Tauri 默认值', () => {
   assert.notEqual(conf.identifier, 'com.tauri.dev');
 });
 
+test('可执行文件名：mainBinaryName 与 productName 一致', () => {
+  assert.equal(conf.mainBinaryName, conf.productName);
+});
+
 test('版本号只在 Cargo.toml：tauri.conf.json 不写 version', () => {
   assert.equal(conf.version, undefined);
   assert.match(read('src-tauri/Cargo.toml'), /^version = "\d+\.\d+\.\d+"/m);
@@ -53,11 +57,12 @@ test('capabilities：窗口名正确，默认只含 core 权限', () => {
 test('构建链路：devUrl / beforeDevCommand / frontendDist 与 Vite 一致', () => {
   assert.equal(conf.build.beforeDevCommand, 'npm run web:dev');
   assert.equal(conf.build.beforeBuildCommand, 'npm run web:build');
-  assert.equal(conf.build.frontendDist, '../dist');
+  assert.equal(conf.build.frontendDist, '../dist/web');
   assert.equal(new URL(conf.build.devUrl).protocol, 'http:');
   const vite = read('vite.config.ts');
   assert.match(vite, /tauri\.conf\.json/);
   assert.match(vite, /build\.devUrl/, 'vite.config.ts 必须从 tauri.conf.json 的 build.devUrl 读取端口');
+  assert.match(vite, /outDir:\s*'dist\/web'/, '前端输出必须在 dist/web，避免和 dist/dev、dist/release 冲突');
   assert.ok(!vite.includes('1420'), '端口不应在 vite.config.ts 里再写一份');
 });
 

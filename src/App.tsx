@@ -84,7 +84,7 @@ export function App() {
       ? window.matchMedia('(prefers-color-scheme: dark)').matches
       : false,
   );
-  const [appVersion, setAppVersion] = useState<string>('0.2.0');
+  const [appVersion, setAppVersion] = useState<string>('0.3.0');
 
   // 视图与面板状态
   const [viewMode, setViewMode] = useState<ViewMode>(() => loadSettings().defaultViewMode);
@@ -120,7 +120,7 @@ export function App() {
   const [tablePickerOpen, setTablePickerOpen] = useState<boolean>(false);
   const [tableHover, setTableHover] = useState<{ rows: number; cols: number }>({ rows: 3, cols: 4 });
   const [alertMenuOpen, setAlertMenuOpen] = useState<boolean>(false);
-  const [statsHover, setStatsHover] = useState<boolean>(false);
+  const [statsTipOpen, setStatsTipOpen] = useState<boolean>(false);
 
   // 内置图片灯箱状态
   const [lightbox, setLightbox] = useState<{ src: string; alt: string; scale: number } | null>(null);
@@ -1226,7 +1226,7 @@ export function App() {
 
         <div className="ml-toolbar-spacer" />
 
-        {/* 右侧：内嵌搜索框、MarkText 四维字数胶囊、快速主题选择、大纲与设置按钮 */}
+        {/* 右侧：内嵌搜索框、快速主题选择、大纲与设置按钮 */}
         <div className="ml-toolbar-group">
           <div className={`ml-filter-box ${searchOpen || searchQuery ? 'is-active' : ''}`}>
             <Icon name="search" size={13} />
@@ -1250,68 +1250,24 @@ export function App() {
             )}
           </div>
 
-          {/* 移植自 MarkText TitleBar 的可点击切换维度字数统计胶囊 */}
-          <div
-            className="ml-stats-pill-wrap"
-            onMouseEnter={() => setStatsHover(true)}
-            onMouseLeave={() => setStatsHover(false)}
-          >
-            <button
-              type="button"
-              className="ml-stats-pill"
-              title="点击切换统计单位 (词数 / 字数 / 字符 / 段落)"
-              onClick={cycleStatsUnit}
-            >
-              <span>{statsBadgeText}</span>
-              <span className="ml-stats-pill-dot">·</span>
-              <span>约 {stats.readingMinutes} 分钟</span>
-            </button>
-            {statsHover && (
-              <div className="ml-stats-popover">
-                <div className="ml-stats-popover-title">文档实时统计 (点击胶囊切换单位)</div>
-                <div className="ml-stats-popover-row">
-                  <span>词数 (Words)</span>
-                  <strong>{stats.words}</strong>
-                </div>
-                <div className="ml-stats-popover-row">
-                  <span>字数 (不含空格)</span>
-                  <strong>{stats.chars}</strong>
-                </div>
-                <div className="ml-stats-popover-row">
-                  <span>总字符 (含空格)</span>
-                  <strong>{stats.charsWithSpaces}</strong>
-                </div>
-                <div className="ml-stats-popover-row">
-                  <span>段落数 (Paragraphs)</span>
-                  <strong>{stats.paragraphs}</strong>
-                </div>
-                <div className="ml-stats-popover-row">
-                  <span>总行数 (Lines)</span>
-                  <strong>{stats.lines}</strong>
-                </div>
-                {stats.tasksTotal > 0 && (
-                  <div className="ml-stats-popover-row">
-                    <span>任务列表完成度</span>
-                    <strong>
-                      {stats.tasksDone} / {stats.tasksTotal}
-                    </strong>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
           {/* 主题快速选择器 */}
           <select
             className="ml-theme-select"
             value={effectiveTheme}
-            onChange={(e) =>
+            onChange={(e) => {
+              const themeId = e.target.value as ThemeId;
+              const selectedGroup = THEME_OPTIONS.find((t) => t.id === themeId)?.group;
               updateSettings({
                 ...settings,
                 followSystemTheme: false,
-                theme: e.target.value as ThemeId,
-              })
-            }
+                theme: themeId,
+                ...(selectedGroup === 'light'
+                  ? { lightTheme: themeId }
+                  : selectedGroup === 'dark'
+                    ? { darkTheme: themeId }
+                    : {}),
+              });
+            }}
             title="快速切换排版主题"
           >
             {THEME_OPTIONS.map((t) => (
@@ -1709,9 +1665,56 @@ export function App() {
           {viewMode === 'read' && (
             <span className="ml-status-tip">💡 双击任意段落精准跳至对应源码行 · 点击任务框直接写回</span>
           )}
-          <span>{stats.words} 词</span>
-          <span>{stats.chars} 字</span>
-          <span>约 {stats.readingMinutes} 分钟阅读</span>
+          <div
+            className="ml-stats-status-wrap"
+            onMouseEnter={() => setStatsTipOpen(true)}
+            onMouseLeave={() => setStatsTipOpen(false)}
+          >
+            <button
+              type="button"
+              className="ml-stats-status"
+              title="文档实时统计：点击切换统计单位，悬停查看明细"
+              aria-expanded={statsTipOpen}
+              onClick={cycleStatsUnit}
+            >
+              <span>{statsBadgeText}</span>
+              <span className="ml-stats-status-dot">·</span>
+              <span>约 {stats.readingMinutes} 分钟阅读</span>
+            </button>
+            {statsTipOpen && (
+              <div className="ml-stats-popover is-up">
+                <div className="ml-stats-popover-title">文档实时统计（点击切换统计单位）</div>
+                <div className="ml-stats-popover-row">
+                  <span>词数 (Words)</span>
+                  <strong>{stats.words}</strong>
+                </div>
+                <div className="ml-stats-popover-row">
+                  <span>字数 (不含空格)</span>
+                  <strong>{stats.chars}</strong>
+                </div>
+                <div className="ml-stats-popover-row">
+                  <span>总字符 (含空格)</span>
+                  <strong>{stats.charsWithSpaces}</strong>
+                </div>
+                <div className="ml-stats-popover-row">
+                  <span>段落数 (Paragraphs)</span>
+                  <strong>{stats.paragraphs}</strong>
+                </div>
+                <div className="ml-stats-popover-row">
+                  <span>总行数 (Lines)</span>
+                  <strong>{stats.lines}</strong>
+                </div>
+                {stats.tasksTotal > 0 && (
+                  <div className="ml-stats-popover-row">
+                    <span>任务列表完成度</span>
+                    <strong>
+                      {stats.tasksDone} / {stats.tasksTotal}
+                    </strong>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </footer>
 
@@ -1719,6 +1722,7 @@ export function App() {
       <SettingsDialog
         open={settingsOpen}
         settings={settings}
+        effectiveTheme={effectiveTheme}
         onSave={updateSettings}
         onClose={() => setSettingsOpen(false)}
       />

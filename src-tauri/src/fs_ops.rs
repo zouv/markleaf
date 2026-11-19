@@ -194,6 +194,40 @@ pub fn save_document_to_path(
     load_document_from_path(trimmed)
 }
 
+/// 在系统文件管理器中打开文件所在目录。只接受已存在的普通文件路径。
+pub fn open_file_directory(raw_path: &str) -> Result<(), String> {
+    let trimmed = raw_path.trim();
+    if trimmed.is_empty() {
+        return Err("文件路径不能为空".to_string());
+    }
+    let file = PathBuf::from(trimmed);
+    if !file.exists() || !file.is_file() {
+        return Err("文件不存在或不是普通文件".to_string());
+    }
+    let canonical = fs::canonicalize(&file).unwrap_or(file);
+    let parent = canonical
+        .parent()
+        .ok_or_else(|| "无法定位文件所在目录".to_string())?;
+    if !parent.is_dir() {
+        return Err("文件所在目录不存在".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    let program = "explorer";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let program = "xdg-open";
+    #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
+    return Err("当前平台不支持打开文件目录".to_string());
+
+    std::process::Command::new(program)
+        .arg(parent)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("打开文件目录失败：{e}"))
+}
+
 /// 从命令行启动参数中提取双击打开的 Markdown 文件路径（跳过第一个可执行文件参数和 `--` 标志参数）。
 pub fn extract_cli_markdown_path() -> Option<String> {
     for arg in std::env::args_os().skip(1) {

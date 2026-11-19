@@ -3,6 +3,7 @@ import {
   getAppInfo,
   getStartupDocument,
   openMarkdownFile,
+  openFileDirectory,
   pickMarkdownFile,
   renderMarkdown,
   saveMarkdownDialog,
@@ -130,6 +131,7 @@ export function App() {
   const readerRef = useRef<HTMLElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const lastPageWidthRef = useRef<PageWidthMode>('comfortable');
 
   const activeTab = useMemo(
     () => tabs.find((t) => t.id === activeTabId) ?? tabs[0],
@@ -172,6 +174,12 @@ export function App() {
       settings.hideScrollbar ? 'true' : 'false',
     );
   }, [effectiveTheme, settings.hideScrollbar]);
+
+  useEffect(() => {
+    if (settings.pageWidthMode !== 'full') {
+      lastPageWidthRef.current = settings.pageWidthMode;
+    }
+  }, [settings.pageWidthMode]);
 
   const updateSettings = useCallback((next: AppSettings) => {
     setSettings(next);
@@ -1017,6 +1025,17 @@ export function App() {
     showToast(`版心宽度：${PAGE_WIDTH_MAP[nextMode].label}`);
   };
 
+  const toggleReaderFill = () => {
+    const nextMode =
+      settings.pageWidthMode === 'full' ? lastPageWidthRef.current : 'full';
+    updateSettings({ ...settings, pageWidthMode: nextMode });
+    showToast(
+      nextMode === 'full'
+        ? '阅读区已铺满编辑区'
+        : `版心宽度：${PAGE_WIDTH_MAP[nextMode].label}`,
+    );
+  };
+
   const stats = activeTab?.stats ?? EMPTY_STATS;
   const statsBadgeText = useMemo(() => {
     switch (settings.statsUnit) {
@@ -1059,6 +1078,9 @@ export function App() {
         onCopyPath={(p) => {
           void navigator.clipboard.writeText(p);
           showToast('已复制文件完整路径');
+        }}
+        onOpenFileDir={(p) => {
+          void openFileDirectory(p).catch((error) => showToast(String(error)));
         }}
       />
 
@@ -1194,6 +1216,22 @@ export function App() {
             <Icon name="width" size={15} />
             <span className="ml-tool-label">
               {settings.pageWidthMode === 'full' ? '全宽' : PAGE_WIDTH_MAP[settings.pageWidthMode].cssMaxWidth}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className={`ml-tool-btn ${settings.pageWidthMode === 'full' ? 'is-active' : ''}`}
+            title={
+              settings.pageWidthMode === 'full'
+                ? '恢复上次阅读宽度'
+                : '阅读区铺满编辑区（100% 宽度）'
+            }
+            onClick={toggleReaderFill}
+          >
+            <Icon name="maximize" size={14} />
+            <span className="ml-tool-label">
+              {settings.pageWidthMode === 'full' ? '铺满中' : '铺满'}
             </span>
           </button>
 
@@ -1583,13 +1621,14 @@ export function App() {
           {(viewMode === 'read' || viewMode === 'split') && (
             <section
               ref={readerRef}
-              className="ml-reader-pane"
+              className={`ml-reader-pane ${settings.pageWidthMode === 'full' ? 'is-full' : ''}`}
               onClick={(e) => void handleReaderClick(e)}
               onDoubleClick={handleReaderDoubleClick}
             >
               <article
                 className={[
                   'ml-prose',
+                  settings.pageWidthMode === 'full' ? 'is-full' : '',
                   settings.showBlockLineBadge ? 'show-line-badge' : '',
                   settings.showHeadingAnchor ? 'show-heading-anchor' : '',
                   settings.codeBlockLineNumbers ? 'show-code-ln' : '',

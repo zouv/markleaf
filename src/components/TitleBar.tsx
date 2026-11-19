@@ -50,6 +50,7 @@ interface TitleBarProps {
   onCopyMarkdown: () => void;
   onOpenSettings: () => void;
   onCopyPath: (path: string) => void;
+  onOpenFileDir: (path: string) => void;
 }
 
 interface DragState {
@@ -80,6 +81,7 @@ export default function TitleBar({
   onCopyMarkdown,
   onOpenSettings,
   onCopyPath,
+  onOpenFileDir,
 }: TitleBarProps) {
   const [maximized, setMaximized] = useState(false);
   const [appMenuPos, setAppMenuPos] = useState<{ x: number; y: number } | null>(null);
@@ -796,6 +798,17 @@ export default function TitleBar({
           {contextTab.filePath && (
             <>
               <div className="ml-menu-sep" />
+              <button
+                type="button"
+                className="ml-context-item"
+                onClick={() => {
+                  const p = contextTab.filePath!;
+                  setTabMenu(null);
+                  onOpenFileDir(p);
+                }}
+              >
+                <span>打开文件所在目录</span>
+              </button>
               <button
                 type="button"
                 className="ml-context-item"

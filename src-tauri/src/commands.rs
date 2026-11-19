@@ -46,6 +46,12 @@ pub fn open_markdown_file(path: String) -> Result<DocumentSession, String> {
     load_document_from_path(&path)
 }
 
+/// 在系统文件管理器中打开指定文件所在目录。
+#[tauri::command]
+pub fn open_file_directory(path: String) -> Result<(), String> {
+    crate::fs_ops::open_file_directory(&path)
+}
+
 /// 弹出系统原生文件选择框，选择并打开 Markdown 文件。
 #[tauri::command]
 pub async fn pick_markdown_file() -> Result<Option<DocumentSession>, String> {
@@ -153,6 +159,12 @@ mod tests {
                 .all(|part| part.chars().next().is_some_and(|c| c.is_ascii_digit())),
             "版本号的每一段都应以数字开头：{version}"
         );
+    }
+
+    #[test]
+    fn open_file_directory_rejects_invalid_paths() {
+        assert!(crate::fs_ops::open_file_directory("").is_err());
+        assert!(crate::fs_ops::open_file_directory("definitely-not-a-real-file-12345.md").is_err());
     }
 
     #[test]

@@ -178,6 +178,42 @@ body,
   height: 0 !important;
 }
 
+[data-hide-scrollbar='true'] * {
+  scrollbar-width: none;
+}
+
+/* 滚动条：轨道透明，滑块随主题弱化，避免深色面板上出现突兀的浅色槽 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ml-border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--ml-border-strong);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ml-text-muted);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .ml-svg-icon {
   flex-shrink: 0;
   display: inline-block;
@@ -849,6 +885,17 @@ body,
   letter-spacing: 0.008em;
   word-break: break-word;
   transition: max-width 0.18s ease;
+}
+
+.ml-reader-pane.is-full {
+  padding: 0;
+}
+
+.ml-prose.is-full {
+  padding: 32px 40px 56px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .ml-prose > *:first-child {

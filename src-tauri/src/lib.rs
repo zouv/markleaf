@@ -3,6 +3,7 @@ pub mod fs_ops;
 pub mod markdown;
 #[cfg(target_os = "windows")]
 mod window_edges;
+mod window_state;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -10,12 +11,15 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "windows")]
             window_edges::install(app.handle());
+            window_state::restore(app.handle());
+            window_state::install(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
             commands::startup_document,
             commands::open_markdown_file,
+            commands::open_file_directory,
             commands::pick_markdown_file,
             commands::save_markdown_file,
             commands::save_markdown_dialog,

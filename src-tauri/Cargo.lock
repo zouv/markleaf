@@ -2086,6 +2086,7 @@ dependencies = [
  "encoding_rs",
  "rfd",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "windows",

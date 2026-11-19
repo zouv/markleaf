@@ -79,6 +79,13 @@ export function openMarkdownFile(path: string): Promise<DocumentSession> {
   return invoke<DocumentSession>('open_markdown_file', { path });
 }
 
+export function openFileDirectory(path: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    return Promise.reject(new Error('浏览器预览模式下不支持打开本地目录，请使用 sh manager.sh dev。'));
+  }
+  return invoke<void>('open_file_directory', { path });
+}
+
 export function pickMarkdownFile(): Promise<DocumentSession | null> {
   if (!isTauriRuntime()) {
     return Promise.resolve(null);

@@ -47,7 +47,7 @@ src/App.tsx (React 18 多页签读写工作台)
 | 加 / 改 IPC 命令 | `src-tauri/src/commands.rs`、`src-tauri/src/lib.rs`、`src/api.ts`、`tests/contract.test.mjs` | `src/styles.css`、窗口配置 | §2.2 |
 | 改 Markdown 解析 / 大纲 / 任务勾选 | `src-tauri/src/markdown.rs`、`src-tauri/src/commands.rs` | 前端样式、打包脚本 | §2.3 |
 | 改文件读写 / 编码识别 / 目录列表 | `src-tauri/src/fs_ops.rs`、`src-tauri/src/commands.rs` | `src-tauri/src/markdown.rs`、前端样式 | §2.4 |
-| 改窗口 / 权限 / CSP / 图标生成 | `src-tauri/tauri.conf.json`、`src-tauri/capabilities/default.json`、`docs/icons/markleaf.svg`、`docs/icons/_build.py` | 业务代码 | §6 |
+| 改窗口 / 权限 / CSP / 图标生成 | `src-tauri/tauri.conf.json`、`src-tauri/capabilities/default.json`、`src-tauri/src/window_state.rs`、`docs/icons/markleaf.svg`、`docs/icons/_build.py` | 业务代码 | §6 |
 | 改打包 / 出包流程 | `scripts/package.mjs`、`scripts/package-lib.mjs`、`package.bat`、`manager.sh`、`package.json`、`vite.config.ts`、`src-tauri/tauri.conf.json`、`tests/contract.test.mjs` | 业务代码、前端样式 | §6 |
 
 ---
@@ -70,9 +70,10 @@ src/App.tsx (React 18 多页签读写工作台)
 | `scripts/process-guard.mjs` | 检测运行中的 MarkLeaf：`dev` 直接强制关闭；`package` 列出进程并询问 Y 后才关闭（非交互环境需 `MARKLEAF_FORCE_CLOSE=1`） | 改运行中实例处理、打包冲突提示 |
 | `src-tauri/src/lib.rs` | Tauri 应用入口与 `generate_handler!` 命令注册表 | 新增或删除 Tauri 命令时 |
 | `src-tauri/src/window_edges.rs` | Windows 原生边框双击：子类化主窗口与 Tauri resize 子窗口，把 `WM_NCLBUTTONDBLCLK` 转成 `window-edge-fill` 事件（unsafe 隔离在此模块） | 改窗口原生边框 / 双击行为时 |
+| `src-tauri/src/window_state.rs` | 窗口尺寸记忆：`CloseRequested` 时保存非最大化的 `inner_size` 到 `app_config_dir/window-size.json`，启动时读取并按当前显示器工作区 clamp 后恢复 | 改窗口尺寸记忆 / 用户数据文件时 |
 | `src-tauri/src/commands.rs` | `#[tauri::command]` 门面函数，连接 `markdown.rs` 与 `fs_ops.rs` | 新增或修改 IPC 命令签名 |
 | `src-tauri/src/markdown.rs` | 基于 `comrak` 的 GFM + Alerts + TaskList + Footnotes + Math + `data-sourcepos` 渲染器、标题 `#slug` 锚点注入、TOC 提取、4 维字数统计与任务复选框行级写回 | 改 Markdown 语法支持、HTML 结构、大纲提取、复选框写回逻辑 |
-| `src-tauri/src/fs_ops.rs` | CLI 启动路径提取、编码无损读写（UTF-8 / BOM / UTF-16 / GBK）、同目录 `.md` 文件列举、原生打开/保存文件对话框 | 改文件打开保存、编码探测、同级目录树扫描 |
+| `src-tauri/src/fs_ops.rs` | CLI 启动路径提取、编码无损读写（UTF-8 / BOM / UTF-16 / GBK）、同目录 `.md` 文件列举、原生打开/保存文件对话框、打开文件所在目录 | 改文件打开保存、编码探测、同级目录树扫描、系统文件管理器 |
 | `tests/contract.test.mjs` | Node 契约测试：校验 `identifier`、CSP、capabilities 及 `commands.rs` ↔ `lib.rs` ↔ `src/api.ts` 三方 IPC 一致性 | 新增 IPC 命令或修改配置约束时 |
 
 ---
@@ -94,6 +95,8 @@ src/App.tsx (React 18 多页签读写工作台)
 | 双击窗口四边单向铺满 | `fillWindowFromEdge` / `EDGE_FILL_THRESHOLD` / `singleFillRef` | 内层由 JS 捕获；最外层原生 resize 边框由 `window_edges.rs` 子类化后发 `window-edge-fill`；铺满时记录原始范围，用户拖动窗口（`onMoved`）恢复原尺寸，手动缩放（`onResized`）直接解除 |
 | 底部状态栏统计 Tip（点击切换单位 / 悬停明细） | `statsBadgeText` / `cycleStatsUnit` / `statsTipOpen` | 统计明细卡片已从工具栏移到右下角状态栏，`.ml-stats-popover.is-up` 向上展开 |
 | 设置中心主题模式与排版 | `themeMode` / `setThemeMode` / `selectTheme` | 浅色 / 深色映射到 `lightTheme` / `darkTheme`，`followSystemTheme` 表示跟随系统；CSS 类为 `.ml-settings-cat`、`.ml-settings-panel`、`.ml-theme-swatch-surface` |
+| 阅读区铺满编辑区 | `toggleReaderFill` / `lastPageWidthRef` / `.ml-prose.is-full` | 工具栏「铺满」把 `pageWidthMode` 切到 `full`，再次点击恢复上次非 full 宽度；full 模式移除书页卡片边框与阅读区外边距，阅读 / 分屏都生效 |
+| 页签右键打开文件所在目录 | `onOpenFileDir` / `open_file_directory` | 仅 `filePath` 非空时显示；Rust 校验路径后调用系统文件管理器 |
 
 ### 2.2 IPC 契约层（`src-tauri/src/commands.rs`、`src/api.ts`）
 
@@ -106,6 +109,7 @@ src/App.tsx (React 18 多页签读写工作台)
 | 原编码保存编辑后的 Markdown | `save_markdown_file` / `saveMarkdownFile` | 保留原文件编码（UTF-8 / BOM / GBK）写回并返回最新渲染结果 |
 | 实时渲染 Markdown 文本（编辑预览） | `render_markdown` / `renderMarkdown` | 纯内存极速渲染，返回 HTML + TOC + 4 维统计数据 |
 | 阅读态勾选任务复选框行级写回 | `toggle_markdown_task` / `toggleMarkdownTask` | 只替换目标行的 `[ ]` ↔ `[x]`，100% 不改动其余行格式与空行 |
+| 在系统文件管理器中打开文件所在目录 | `open_file_directory` / `openFileDirectory` | 入参 `{ path }`；校验存在性与普通文件，Windows 用 `explorer`、macOS 用 `open`、Linux 用 `xdg-open`，不经过 shell |
 
 ### 2.3 Rust 极速 Markdown 引擎（`src-tauri/src/markdown.rs`）
 
@@ -154,6 +158,7 @@ src/App.tsx (React 18 多页签读写工作台)
 | `src/api.ts` | `save_markdown_dialog` | 原生保存框 | 入参 `{ defaultName, content }`；另存为新文件并返回 `Option<DocumentSession>` |
 | `src/api.ts` | `render_markdown` | 内部 IPC | 入参 `{ content }`；纯内存极速渲染，返回 `RenderedMarkdown { html, toc, stats }` |
 | `src/api.ts` | `toggle_markdown_task` | 内部 IPC | 入参 `{ content, lineNumber, path, encoding }`；切换指定行任务状态，若传了 `path` 则同步写盘 |
+| `src/api.ts` | `open_file_directory` | 内部 IPC + 路径校验 | 入参 `{ path }`；在系统文件管理器中打开该文件所在目录 |
 
 **数据 / 单位约定**：所有行号（`line` / `lineNumber`）统一使用 **1-based**（与 `comrak` 的 `data-sourcepos` 一致）；文件编码使用标准名称（`"UTF-8"` / `"UTF-8 BOM"` / `"GBK"` / `"UTF-16LE"`）。
 
@@ -164,7 +169,7 @@ src/App.tsx (React 18 多页签读写工作台)
 | 区段 | 注释锚点（搜这个） | 内容 |
 |---|---|---|
 | 主题变量表 | `/* === [SECTION: THEMES] === */` | Paper、GitHub、Sepia、Solarized Light、Night、One Dark、Nord、Catppuccin Mocha 共 8 套亮/暗主题 CSS 变量 |
-| 工作台壳体布局 | `/* === [SECTION: WORKBENCH] === */` | 无边框一体式标题栏与多页签栏、分组簇主工具栏、底部统计 Tip 与悬停明细卡片、三栏弹性工作区 |
+| 工作台壳体布局 | `/* === [SECTION: WORKBENCH] === */` | 无边框一体式标题栏与多页签栏、分组簇主工具栏、全局滚动条（透明轨道 + 主题滑块）、底部统计 Tip 与悬停明细卡片、三栏弹性工作区 |
 | 印刷级正文排版 | `/* === [SECTION: PROSE] === */` | `.ml-prose` 5 档版心行宽、标题与 `#` 锚点按钮、GitHub Alerts、任务列表、代码块行号与折行、专注模式样式 |
 | 便捷编辑器与模态框 | `/* === [SECTION: EDITOR] === */` | 格式化工具条、2D 网格建表选择器、同步滚动行号水槽、双栏偏好设置弹窗与图片灯箱样式 |
 
@@ -185,6 +190,7 @@ src/App.tsx (React 18 多页签读写工作台)
 - **打包事务与版本过滤**：`scripts/package.mjs` 先写 `.runtime/staging`，再用 `publishPackageSet` 原子替换 `dist/dev`、`dist/release`（失败回滚）；`collectInstallers` 只收集与 `Cargo.toml` 版本一致的安装包，避免历史版本混入。
 - **图标**：唯一矢量源是 `docs/icons/markleaf.svg`；执行 `python docs/icons/_build.py` 生成 PNG / ICO / ICNS 并安装到 `src-tauri/icons/`。不要手改生成文件或尺寸。
 - **原生边框双击**：`window_edges.rs` 在 Windows setup 时子类化主窗口与 `TAURI_DRAG_RESIZE_BORDERS` 子窗口；命中边框后发 `window-edge-fill`，由 `TitleBar.tsx` 统一调用 `fillWindowFromEdge` 处理。子类化失败时内层 JS 边缘处理仍然可用。
+- **窗口尺寸记忆**：`window_state.rs` 在 `CloseRequested` 时保存非最大化的 `inner_size` 到 `app_config_dir/window-size.json`；启动 setup 读取后按当前显示器工作区 clamp，再 `set_size` 恢复。
 
 ---
 
@@ -200,5 +206,8 @@ src/App.tsx (React 18 多页签读写工作台)
 - **单向铺满要记录原始范围并区分自身事件**：铺满前把 `innerSize` / `outerPosition` 存进 `singleFillRef`；`onMoved` / `onResized` 会因 `setSize` / `setPosition` 自身触发，必须用 `fillTargetRef` 比对目标尺寸/位置，否则铺满瞬间会被误判为用户拖拽而立即还原。
 - **设置弹窗类名必须与 `SettingsDialog.tsx` 对齐**：曾出现 TSX 使用 `.ml-settings-cat` / `.ml-settings-panel` / `.ml-theme-swatch-surface`，CSS 仍是 `.ml-settings-nav-item` / `.ml-settings-content` / `.ml-theme-swatch-page`，导致左侧分类退化成默认按钮、主题预览空白；改类名时两处同步。
 - **图标构建依赖无头 Edge**：`docs/icons/_build.py` 用 Edge 渲染 SVG 后把洋红背景抠成透明；找不到 Edge 时设置 `MARKLEAF_EDGE`。PNG / ICO / ICNS 是二进制，不要改成 Git LFS 指针。
+- **窗口尺寸保存的是内容尺寸**：`window_state` 保存 `inner_size` 并跳过最大化状态；不要改成保存最大化后的 `outer_size`，否则下次启动会得到一个“看起来像最大化”的普通窗口。显示器分辨率变化时启动会 clamp 到当前工作区。
+- **全宽阅读仍由 `pageWidthMode` 驱动**：`.ml-prose.is-full` 只移除书页卡片边框与阅读区外边距，实际宽度仍是 `PAGE_WIDTH_MAP.full = 100%`；不要把全宽逻辑复制到 SettingsDialog 或 CSS 的其它类。
+- **滚动条轨道保持透明**：全局滚动条使用透明 track + 主题 `--ml-border-strong` 滑块；不要给某个容器写死深色轨道底色，否则换主题后会突兀。
 - **统计明细卡片唯一入口在右下角**：工具栏不再放统计胶囊，底部 `.ml-stats-status` 悬停展开 `.ml-stats-popover.is-up`，点击切换 `statsUnit`；不要再在别处复制一份统计行。
 - **打包前先关闭正在运行的 MarkLeaf**：Tauri 需要替换 `target/<profile>/MarkLeaf.exe`，Windows 会锁定正在运行的可执行文件。`scripts/process-guard.mjs` 会在打包前检测：`package` 列出进程并询问 Y（非交互环境需 `MARKLEAF_FORCE_CLOSE=1`），`dev` 直接强制关闭；绕过脚本直接 `tauri build` 时仍需手动退出，否则报「拒绝访问 (os error 5)」。

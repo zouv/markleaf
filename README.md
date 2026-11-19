@@ -45,13 +45,13 @@ sh manager.sh package # 生产打包，安装包复制到 dist/
 | 脚本 | 作用 |
 |---|---|
 | `setup.bat` | 安装前端依赖 |
-| `dev.bat` | 启动 `tauri dev`（Ctrl+C 停止） |
+| `dev.bat` | 启动 `tauri dev`（Ctrl+C 停止）；若应用正在运行会先强制关闭 |
 | `build.bat` | 构建前端到 `dist/` |
 | `test.bat` | 跑全部测试 |
-| `package.bat` | 打包并复制安装包到 `dist/` |
+| `package.bat` | 出包到 `dist/dev` 与 `dist/release`（纯 cmd，无需 Git Bash）；若应用正在运行会先询问是否强制关闭 |
 | `clean.bat` | 清理构建产物 |
 
-设置环境变量 `MARKLEAF_NO_PAUSE=1` 可跳过结尾暂停；Git Bash 不在标准位置时用 `MARKLEAF_BASH_EXE` 指定 `bash.exe`。
+设置环境变量 `MARKLEAF_NO_PAUSE=1` 可跳过结尾暂停；非交互环境需要确认强制关闭运行中的实例时用 `MARKLEAF_FORCE_CLOSE=1`；Git Bash 不在标准位置时用 `MARKLEAF_BASH_EXE` 指定 `bash.exe`。
 
 ## 依赖与前置条件
 

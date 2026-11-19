@@ -52,7 +52,8 @@ cmd_setup() {
 
 cmd_dev() {
   require_node; require_rust
-  log "tauri dev：Vite + Rust（Ctrl-C 退出）"
+  log "关闭运行中的实例（若有），然后 tauri dev：Vite + Rust（Ctrl-C 退出）"
+  node "${PROJECT_ROOT}/scripts/process-guard.mjs" --force
   npm run desktop:dev "$@"
 }
 

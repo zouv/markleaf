@@ -54,6 +54,7 @@ export interface AppSettings {
   focusMode: boolean; // 专注模式（仅高亮当前活跃段落）
 
   // 文件、侧栏与行为
+  singleWindowMode: boolean; // 双击 .md 时合并到已运行窗口，默认关闭（保持独立多开）
   defaultViewMode: ViewMode;
   autoSave: boolean;
   autoSaveDelay: number; // 1000..10000 ms
@@ -203,6 +204,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   typewriterMode: false,
   focusMode: false,
 
+  singleWindowMode: false,
   defaultViewMode: 'read',
   autoSave: false,
   autoSaveDelay: 3000,
@@ -269,6 +271,7 @@ export function loadSettings(): AppSettings {
       typewriterMode: Boolean(parsed.typewriterMode ?? DEFAULT_SETTINGS.typewriterMode),
       focusMode: Boolean(parsed.focusMode ?? DEFAULT_SETTINGS.focusMode),
 
+      singleWindowMode: Boolean(parsed.singleWindowMode ?? DEFAULT_SETTINGS.singleWindowMode),
       defaultViewMode: oneOf(parsed.defaultViewMode, ['read', 'split', 'edit'], DEFAULT_SETTINGS.defaultViewMode),
       autoSave: Boolean(parsed.autoSave ?? DEFAULT_SETTINGS.autoSave),
       autoSaveDelay: clampNumber(parsed.autoSaveDelay, 1000, 10000, DEFAULT_SETTINGS.autoSaveDelay),

@@ -12,10 +12,10 @@
 
 ## 状态快照
 
-- **最近更新**：2026-11-19
-- **整体状态**：✅ 无进行中任务（窗口状态与阅读体验优化已完成）
+- **最近更新**：2026-11-23
+- **整体状态**：✅ 无进行中任务（单窗口模式已完成并通过实测）
 - **工作分支**：主分支
-- **最后验证状态**：`sh manager.sh check` ✅ / `sh manager.sh test` ✅ / `sh manager.sh package` ✅ / 窗口尺寸记忆实测 ✅ / 原生边框四向实测 ✅ / `sh check-docs.sh` ✅
+- **最后验证状态**：`sh manager.sh check` ✅ / `sh manager.sh test` ✅ / `sh check-docs.sh` ✅ / 单窗口模式 CDP 实测 ✅
 
 ---
 
@@ -33,6 +33,7 @@
 
 - 0.3.0 已发布：浅绿色系图标、窗口四边单向铺满/拖动恢复、设置中心排版与亮暗模式、底部统计 Tip、应用菜单对齐。
 - 本轮优化：窗口尺寸记忆、阅读区「铺满」按钮、页签右键「打开文件所在目录」、滚动条透明轨道与主题滑块。
+- 单窗口模式：设置中心「文件与大纲」新增开关（默认关闭）；开启后双击 `.md` 合并到已运行窗口新页签，关闭时保持独立多开。
 - 以上交互与视觉效果需在真实桌面窗口确认。
 
 ## 阻塞 / 待决策（Blockers）
@@ -43,7 +44,7 @@
 
 ## 下一步（Next Steps）
 
-1. 启动新构建的 `MarkLeaf.exe`，验收窗口尺寸记忆、阅读区铺满、页签打开目录与滚动条样式。
+1. 启动新构建的 `MarkLeaf.exe`，验收单窗口模式（默认多开 / 开启后合并）与窗口尺寸记忆、阅读区铺满、页签打开目录、滚动条样式。
 2. 下一阶段里程碑 M2 仍从 `ROADMAP.md` 的 `P1-1` 开始。
 
 ---
@@ -51,20 +52,16 @@
 ## 本任务验证（Verify）
 
 - `sh manager.sh check`：cargo fmt / clippy / tsc 全部通过。
-- `sh manager.sh test`：9 项 Node 契约测试 + 7 项 Rust 单测全部通过。
-- `sh manager.sh package`：Release + Debug 构建、事务发布成功；产物为 `MarkLeaf.exe`。
-- 窗口尺寸实测：把窗口设为 1200×760 后关闭，写入 `window-size.json` 的内容尺寸为 1184×752；重新启动恢复为 1200×760。
-- 原生边框实测：dev 与 `dist/release/unpack/MarkLeaf.exe` 在最外侧边框 4px 内双击，左右上下四向均正确铺满。
-- 恢复原尺寸实测：合成标题栏 `mousedown` + `mousemove` 走真实拖拽入口，窗口从铺满宽度恢复为 `1376×868` 并移动到新位置。
-- 设置弹窗截图检查：左侧分类为正常列表，主题卡片预览色块与说明文字显示完整，主题模式分段按钮可见。
-- 图标构建：`python docs/icons/_build.py` 生成 1024 / 512 / 256 / 128 / 64 / 48 / 32 / 16 PNG、ICO、ICNS，并安装到 `src-tauri/icons/`；16 / 32 / 48 / 64 / 128 尺寸可辨认。
+- `sh manager.sh test`：10 项 Node 契约测试 + 8 项 Rust 单测全部通过。
+- 单窗口模式实测（WebView2 CDP）：关闭时第二次双击产生独立 `MarkLeaf.exe`（进程数 2）；开启时第二次双击进程数保持 1，页签由 `a.md` 变为 `a.md + b.md`。
+- 设置 UI 实测：设置 → 文件与大纲 → 勾选/取消「单窗口模式」，`localStorage` 与 `app_config_dir/preferences.json` 均同步为 true / false。
 - `sh check-docs.sh`：0 错误 0 警告。
 
 ---
 
 ## 本任务决策（Decisions）
 
-- 长期架构决策与避坑经验已归档至 `ARCHITECTURE.md` §7。
+- 长期架构决策与避坑经验已归档至 `ARCHITECTURE.md` §3.3 与 §7。
 
 ---
 

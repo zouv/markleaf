@@ -12,7 +12,7 @@
 
 ## 0. 一句话架构
 
-Tauri 2（无边框自定义窗口 + Rust 原生 `comrak` 极速 Markdown 解析 + `encoding_rs` 无损编码读写 + CLI 秒开捕获）+ React 18（多页签拖拽工作台 + 8 套印刷级主题 + 行号锚定双击就地编辑 + 双栏偏好设置系统）。
+Tauri 2（无边框自定义窗口 + 单实例转发/多开 + Rust 原生 `comrak` 极速 Markdown 解析 + `encoding_rs` 无损编码读写 + CLI 秒开捕获）+ React 18（多页签拖拽工作台 + 8 套印刷级主题 + 行号锚定双击就地编辑 + 双栏偏好设置系统）。
 
 ```
 双击 .md / CLI 参数 / 界面多页签打开
@@ -42,7 +42,8 @@ src/App.tsx (React 18 多页签读写工作台)
 | 任务类型 | 该读（仅限） | 可忽略 | 入口小节 |
 |---|---|---|---|
 | 改标题栏 / 多页签拖拽 / 窗口控制 | `src/components/TitleBar.tsx`、`src/App.tsx`、`src/styles.css` | `src-tauri/src/markdown.rs` | §2.1 |
-| 改偏好设置 / 主题 / 版心行宽 / 行号配置 | `src/settings.ts`、`src/components/SettingsDialog.tsx`、`src/App.tsx`、`src/styles.css` | `src-tauri/` 的 Rust 实现 | §2.1 |
+| 改偏好设置 / 主题 / 版心行宽 / 行号配置 | `src/settings.ts`、`src/components/SettingsDialog.tsx`、`src/App.tsx`、`src/styles.css` | `src-tauri/` 的 Rust 实现（单窗口模式除外，见下一行） | §2.1 |
+| 改单窗口模式 / 第二实例合并 / 多开行为 | `src-tauri/src/single_instance.rs`、`src-tauri/src/preferences.rs`、`src-tauri/src/lib.rs`、`src/App.tsx`、`src/api.ts` | `src-tauri/src/markdown.rs`、前端样式 | §3.3 |
 | 改工具栏 / 编辑器 / 阅读交互 | `src/App.tsx`、`src/ui/Icon.tsx`、`src/demoDoc.ts`、`src/styles.css` | `src-tauri/` 的 Rust 实现、打包脚本 | §2.1 |
 | 加 / 改 IPC 命令 | `src-tauri/src/commands.rs`、`src-tauri/src/lib.rs`、`src/api.ts`、`tests/contract.test.mjs` | `src/styles.css`、窗口配置 | §2.2 |
 | 改 Markdown 解析 / 大纲 / 任务勾选 | `src-tauri/src/markdown.rs`、`src-tauri/src/commands.rs` | 前端样式、打包脚本 | §2.3 |
@@ -68,9 +69,11 @@ src/App.tsx (React 18 多页签读写工作台)
 | `docs/icons/markleaf.svg` + `docs/icons/_build.py` | 图标唯一矢量源（512 viewBox）与构建脚本：无头 Edge 渲染、洋红抠图、生成 PNG / ICO / ICNS 并安装到 `src-tauri/icons/` | 重新设计图标或调整导出尺寸时 |
 | `scripts/package.mjs` + `scripts/package-lib.mjs` | 零第三方依赖出包脚本：release/debug 构建、unpack 目录、zip、manifest、SHA256 与事务发布到 `dist/dev`、`dist/release` | 改打包流程、产物布局、校验方式 |
 | `scripts/process-guard.mjs` | 检测运行中的 MarkLeaf：`dev` 直接强制关闭；`package` 列出进程并询问 Y 后才关闭（非交互环境需 `MARKLEAF_FORCE_CLOSE=1`） | 改运行中实例处理、打包冲突提示 |
-| `src-tauri/src/lib.rs` | Tauri 应用入口与 `generate_handler!` 命令注册表 | 新增或删除 Tauri 命令时 |
+| `src-tauri/src/lib.rs` | Tauri 应用入口、单实例插件注册与 `generate_handler!` 命令注册表 | 新增或删除 Tauri 命令、调整插件注册顺序时 |
 | `src-tauri/src/window_edges.rs` | Windows 原生边框双击：子类化主窗口与 Tauri resize 子窗口，把 `WM_NCLBUTTONDBLCLK` 转成 `window-edge-fill` 事件（unsafe 隔离在此模块） | 改窗口原生边框 / 双击行为时 |
 | `src-tauri/src/window_state.rs` | 窗口尺寸记忆：`CloseRequested` 时保存非最大化的 `inner_size` 到 `app_config_dir/window-size.json`，启动时读取并按当前显示器工作区 clamp 后恢复 | 改窗口尺寸记忆 / 用户数据文件时 |
+| `src-tauri/src/preferences.rs` | Rust 可读偏好镜像：`app_config_dir/preferences.json` 的 `singleWindowMode`，供第二实例插件回调在启动早期读取 | 新增需 Rust 启动早期读取的偏好 |
+| `src-tauri/src/single_instance.rs` | 单实例插件回调与待打开文档队列：单窗口模式把双击文档合并到主窗口，关闭时重新拉起独立进程保持多开 | 改单窗口 / 多开行为、第二实例参数转发 |
 | `src-tauri/src/commands.rs` | `#[tauri::command]` 门面函数，连接 `markdown.rs` 与 `fs_ops.rs` | 新增或修改 IPC 命令签名 |
 | `src-tauri/src/markdown.rs` | 基于 `comrak` 的 GFM + Alerts + TaskList + Footnotes + Math + `data-sourcepos` 渲染器、标题 `#slug` 锚点注入、TOC 提取、4 维字数统计与任务复选框行级写回 | 改 Markdown 语法支持、HTML 结构、大纲提取、复选框写回逻辑 |
 | `src-tauri/src/fs_ops.rs` | CLI 启动路径提取、编码无损读写（UTF-8 / BOM / UTF-16 / GBK）、同目录 `.md` 文件列举、原生打开/保存文件对话框、打开文件所在目录 | 改文件打开保存、编码探测、同级目录树扫描、系统文件管理器 |
@@ -97,6 +100,7 @@ src/App.tsx (React 18 多页签读写工作台)
 | 设置中心主题模式与排版 | `themeMode` / `setThemeMode` / `selectTheme` | 浅色 / 深色映射到 `lightTheme` / `darkTheme`，`followSystemTheme` 表示跟随系统；CSS 类为 `.ml-settings-cat`、`.ml-settings-panel`、`.ml-theme-swatch-surface` |
 | 阅读区铺满编辑区 | `toggleReaderFill` / `lastPageWidthRef` / `.ml-prose.is-full` | 工具栏「铺满」把 `pageWidthMode` 切到 `full`，再次点击恢复上次非 full 宽度；full 模式移除书页卡片边框与阅读区外边距，阅读 / 分屏都生效 |
 | 页签右键打开文件所在目录 | `onOpenFileDir` / `open_file_directory` | 仅 `filePath` 非空时显示；Rust 校验路径后调用系统文件管理器 |
+| 设置中心「单窗口模式」与二实例合并 | `singleWindowMode` / `drainPendingOpenDocuments` / `setSingleWindowMode` | 前端 `localStorage` 是 UI 源，变更时镜像到 Rust `preferences.json`；二实例路径经 Rust 队列 + `markleaf-open-documents` 事件排空后调 `openPathInTab` |
 
 ### 2.2 IPC 契约层（`src-tauri/src/commands.rs`、`src/api.ts`）
 
@@ -110,6 +114,8 @@ src/App.tsx (React 18 多页签读写工作台)
 | 实时渲染 Markdown 文本（编辑预览） | `render_markdown` / `renderMarkdown` | 纯内存极速渲染，返回 HTML + TOC + 4 维统计数据 |
 | 阅读态勾选任务复选框行级写回 | `toggle_markdown_task` / `toggleMarkdownTask` | 只替换目标行的 `[ ]` ↔ `[x]`，100% 不改动其余行格式与空行 |
 | 在系统文件管理器中打开文件所在目录 | `open_file_directory` / `openFileDirectory` | 入参 `{ path }`；校验存在性与普通文件，Windows 用 `explorer`、macOS 用 `open`、Linux 用 `xdg-open`，不经过 shell |
+| 同步「单窗口模式」到 Rust 偏好镜像 | `set_single_window_mode` / `setSingleWindowMode` | 入参 `{ enabled }`；写入 `app_config_dir/preferences.json`，供之后启动的第二实例回调读取 |
+| 取出第二实例转发的待打开文档 | `take_pending_open_documents` / `takePendingOpenDocuments` | 返回已校验存在的 Markdown 路径数组；前端首屏完成后排空，兜底事件早于监听注册的竞态 |
 
 ### 2.3 Rust 极速 Markdown 引擎（`src-tauri/src/markdown.rs`）
 
@@ -126,6 +132,7 @@ src/App.tsx (React 18 多页签读写工作台)
 | 自动识别 UTF-8 / UTF-16 / GBK 编码读取文本 | `decode_bytes_lossless` | 优先检查 BOM，其次严格 UTF-8，回退 GBK（`encoding_rs::GBK`），杜绝中文乱码 |
 | 按原文件编码写回磁盘 | `encode_text_with_encoding` | 根据读取时记录的编码标签原样编码写回，避免静默破坏旧文件编码 |
 | 扫描当前文件所在目录的同级 `.md` 文件 | `list_sibling_markdown_files` | 只读同级单层 `.md`/`.markdown`/`.mdx`，按自然顺序排列供侧栏秒切 |
+| 从第二实例参数中解析 Markdown 路径 | `extract_markdown_path_from_args` | 相对路径按回调 cwd 解析并 canonicalize；`extract_cli_markdown_path` 复用它处理首次启动参数 |
 
 ---
 
@@ -144,6 +151,13 @@ src/App.tsx (React 18 多页签读写工作台)
 - **关键坑**：MarkText 把全文 parse 成状态树再 serialize，导致未修改段落的空行、列表缩进和标题风格被改写。
 - **正确实现**：`comrak` 开启 `render.sourcepos = true`，所有块级元素自带 `data-sourcepos="起始行:列-结束行:列"`；双击时前端读取该属性算出 1-based 行号并跳转光标；勾选复选框调 `toggle_task_at_line` 仅替换该行第一个 `[ ]`/`[x]`，原文件其余字节纹丝不动。
 
+### 3.3 第二实例合并到单窗口（单窗口模式）
+
+- **需求语义**：设置中心开启「单窗口模式」后，在资源管理器双击 `.md` 不再启动新窗口，而是把文档作为新页签合并到已运行窗口；默认关闭时保持每次双击独立多开。
+- **正确实现**：`lib.rs` 始终最先注册 `tauri-plugin-single-instance`（否则运行中开启模式后第一个实例没有监听目标）。第二实例被插件拦下后回调 `single_instance::handle_second_instance`：读取 `app_config_dir/preferences.json`，开启时把路径压入 Rust 静态队列、聚焦主窗口并发 `markleaf-open-documents`，前端排空队列后调 `openPathInTab`；关闭时用 `argv[0]`（回退 `current_exe`）重新 spawn 一个带 `MARKLEAF_MULTI_INSTANCE_CHILD` 的独立进程，子进程跳过插件以保留多开。
+- **关键坑**：不能把插件改成按设置条件注册——运行中从未注册的一方无法接收合并请求；也不能只靠事件传路径——事件可能早于前端监听注册，必须由 Rust 队列兜底。
+- **调用链**：资源管理器双击 → 第二实例 → `tauri-plugin-single-instance` → `single_instance::handle_second_instance` → `preferences::read_single_window_mode` → 入队 + `emit` → `api::onOpenDocumentsRequested` → `api::takePendingOpenDocuments` → `App.openPathInTab`。
+
 ---
 
 ## 4. 数据流 / 接口契约（模块边界）
@@ -159,6 +173,9 @@ src/App.tsx (React 18 多页签读写工作台)
 | `src/api.ts` | `render_markdown` | 内部 IPC | 入参 `{ content }`；纯内存极速渲染，返回 `RenderedMarkdown { html, toc, stats }` |
 | `src/api.ts` | `toggle_markdown_task` | 内部 IPC | 入参 `{ content, lineNumber, path, encoding }`；切换指定行任务状态，若传了 `path` 则同步写盘 |
 | `src/api.ts` | `open_file_directory` | 内部 IPC + 路径校验 | 入参 `{ path }`；在系统文件管理器中打开该文件所在目录 |
+| `src/api.ts` | `set_single_window_mode` | 内部 IPC | 入参 `{ enabled }`；写入 `app_config_dir/preferences.json` 的 `singleWindowMode` |
+| `src/api.ts` | `take_pending_open_documents` | 内部 IPC | 返回 `string[]`；清空第二实例转发的待打开 Markdown 路径队列 |
+| `src/api.ts` | Tauri 事件 `markleaf-open-documents` | 内部事件 | Rust 第二实例回调推送；前端收到后调用 `take_pending_open_documents` 排空并新开页签 |
 
 **数据 / 单位约定**：所有行号（`line` / `lineNumber`）统一使用 **1-based**（与 `comrak` 的 `data-sourcepos` 一致）；文件编码使用标准名称（`"UTF-8"` / `"UTF-8 BOM"` / `"GBK"` / `"UTF-16LE"`）。
 
@@ -186,6 +203,7 @@ src/App.tsx (React 18 多页签读写工作台)
 - **可执行文件名**：`tauri.conf.json` 的 `mainBinaryName` 为 `MarkLeaf`；`scripts/package.mjs` 用该名称从 `target/<profile>/MarkLeaf.exe` 收集可执行文件，打包产物与 zip 内文件名一致。
 - **App 标识**：`src-tauri/tauri.conf.json` 的 `identifier`（`dev.markleaf.app`）。
 - **无边框窗口与权限**：`tauri.conf.json` 中 `decorations: false`，`src-tauri/capabilities/default.json` 中显式声明 `core:window:allow-minimize`、`core:window:allow-toggle-maximize`、`core:window:allow-close`、`core:window:allow-start-dragging`、`core:window:allow-current-monitor`、`core:window:allow-inner-size`、`core:window:allow-outer-position`、`core:window:allow-set-size`、`core:window:allow-set-position`。
+- **单窗口模式与多开**：`lib.rs` 最先注册 `tauri-plugin-single-instance`；该设置镜像在 `app_config_dir/preferences.json`，第二实例回调按值决定合并到主窗口或重新拉起独立子进程。详见 §3.3 与 §7。
 - **出包产物**：前端在 `dist/web`（`tauri.conf.json` 的 `frontendDist` 指向 `../dist/web`）；`package` 运行 `tauri build` + `tauri build --debug`，Debug 包打成 `dist/dev/<Product>_<版本>_<平台>-unpack-debug.zip`，Release 可执行文件 / `.app` 放入 `dist/release/unpack/`，安装包放 `dist/release/`，并生成 `SHA256SUMS.txt` 与 `unpack-manifest.json`。
 - **打包事务与版本过滤**：`scripts/package.mjs` 先写 `.runtime/staging`，再用 `publishPackageSet` 原子替换 `dist/dev`、`dist/release`（失败回滚）；`collectInstallers` 只收集与 `Cargo.toml` 版本一致的安装包，避免历史版本混入。
 - **图标**：唯一矢量源是 `docs/icons/markleaf.svg`；执行 `python docs/icons/_build.py` 生成 PNG / ICO / ICNS 并安装到 `src-tauri/icons/`。不要手改生成文件或尺寸。
@@ -211,3 +229,7 @@ src/App.tsx (React 18 多页签读写工作台)
 - **滚动条轨道保持透明**：全局滚动条使用透明 track + 主题 `--ml-border-strong` 滑块；不要给某个容器写死深色轨道底色，否则换主题后会突兀。
 - **统计明细卡片唯一入口在右下角**：工具栏不再放统计胶囊，底部 `.ml-stats-status` 悬停展开 `.ml-stats-popover.is-up`，点击切换 `statsUnit`；不要再在别处复制一份统计行。
 - **打包前先关闭正在运行的 MarkLeaf**：Tauri 需要替换 `target/<profile>/MarkLeaf.exe`，Windows 会锁定正在运行的可执行文件。`scripts/process-guard.mjs` 会在打包前检测：`package` 列出进程并询问 Y（非交互环境需 `MARKLEAF_FORCE_CLOSE=1`），`dev` 直接强制关闭；绕过脚本直接 `tauri build` 时仍需手动退出，否则报「拒绝访问 (os error 5)」。
+- **单窗口模式设置必须镜像到 Rust**：UI 源仍是 `localStorage` 的 `singleWindowMode`，但第二个实例的回调启动时前端还没加载，因此 `App.tsx` 启动与每次切换都要调 `set_single_window_mode` 写 `app_config_dir/preferences.json`；只改 `settings.ts` 不会生效。
+- **单实例插件必须始终注册，不能按设置条件注册**：运行中开启单窗口模式后，之前未注册插件的首个实例无法成为合并目标；模式关闭时改为在回调里用 `argv[0]` / `current_exe` 重新 spawn 带 `MARKLEAF_MULTI_INSTANCE_CHILD` 的子进程，子进程跳过插件以保留多开。
+- **第二实例路径不能只靠事件传递**：回调先入 Rust 静态队列再 `emit`，前端首屏完成后还要 `take_pending_open_documents` 排空；事件可能早于监听注册，只用事件会在启动竞态丢文档。
+- **事件名与命令名是 Rust ↔ TS 契约**：`markleaf-open-documents`、`set_single_window_mode`、`take_pending_open_documents` 三处（Rust 实现 / `src/api.ts` / 契约测试）要同步，不要动态拼名称。单实例插件不新增前端权限：`core:default` 已含 `core:event:default`，不需要 `@tauri-apps/plugin-*` npm 包。

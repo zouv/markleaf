@@ -228,20 +228,40 @@ pub fn open_file_directory(raw_path: &str) -> Result<(), String> {
         .map_err(|e| format!("打开文件目录失败：{e}"))
 }
 
-/// 从命令行启动参数中提取双击打开的 Markdown 文件路径（跳过第一个可执行文件参数和 `--` 标志参数）。
-pub fn extract_cli_markdown_path() -> Option<String> {
-    for arg in std::env::args_os().skip(1) {
-        let s = arg.to_string_lossy();
-        if s.starts_with('-') {
+/// 从一组文档参数中找出第一个存在且后缀受支持的 Markdown 路径。
+/// 相对路径按 `base_dir` 解析（第二实例回调传来的 cwd）；传 `None` 时按当前工作目录。
+pub fn extract_markdown_path_from_args<I, S>(args: I, base_dir: Option<&Path>) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    for arg in args {
+        let raw = arg.as_ref();
+        if raw.starts_with('-') {
             continue;
         }
-        let cleaned = s.strip_prefix("file:///").unwrap_or(&s);
-        let p = Path::new(cleaned);
-        if p.exists() && p.is_file() && is_markdown_extension(p) {
-            return Some(cleaned.to_string());
+        let cleaned = raw.strip_prefix("file:///").unwrap_or(raw);
+        let candidate = Path::new(cleaned);
+        let resolved = match base_dir {
+            Some(base) if candidate.is_relative() => base.join(candidate),
+            _ => candidate.to_path_buf(),
+        };
+        if resolved.is_file() && is_markdown_extension(&resolved) {
+            let canonical = fs::canonicalize(&resolved).unwrap_or(resolved);
+            return Some(normalize_display_path(&canonical));
         }
     }
     None
+}
+
+/// 从命令行启动参数中提取双击打开的 Markdown 文件路径（跳过第一个可执行文件参数和 `--` 标志参数）。
+pub fn extract_cli_markdown_path() -> Option<String> {
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    let cwd = std::env::current_dir().ok();
+    extract_markdown_path_from_args(args, cwd.as_deref())
 }
 
 #[cfg(test)]
@@ -267,5 +287,23 @@ mod tests {
         assert!(is_markdown_extension(Path::new("README.md")));
         assert!(is_markdown_extension(Path::new("guide.MARKDOWN")));
         assert!(!is_markdown_extension(Path::new("binary.exe")));
+    }
+
+    #[test]
+    fn extracts_markdown_path_from_forwarded_args() {
+        let dir = std::env::temp_dir().join(format!("markleaf-args-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let file = dir.join("note.md");
+        fs::write(&file, "# note").expect("write temp markdown");
+        let expected = normalize_display_path(&fs::canonicalize(&file).expect("canonicalize file"));
+
+        let found = extract_markdown_path_from_args(
+            ["--flag".to_string(), "note.md".to_string()],
+            Some(&dir),
+        );
+        assert_eq!(found.as_deref(), Some(expected.as_str()));
+        assert!(extract_markdown_path_from_args(["missing.md".to_string()], Some(&dir)).is_none());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

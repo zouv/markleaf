@@ -87,9 +87,24 @@ test('IPC 契约：commands.rs 定义 = lib.rs 注册 = src/api.ts 调用', () =
   assert.deepEqual([...invoked].sort(), [...defined].sort(), 'src/api.ts 调用的命令必须与 Rust 命令一致');
 });
 
-test('默认不引入 Tauri 插件（需要时先评审权限与攻击面）', () => {
+test('Tauri 插件：前端不引入插件 npm 包，Rust 仅登记已评审插件', () => {
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
   for (const name of Object.keys(deps)) {
     assert.ok(!name.startsWith('@tauri-apps/plugin-'), `模板默认不引入插件：${name}`);
   }
+  const cargo = read('src-tauri/Cargo.toml');
+  const rustPlugins = [...cargo.matchAll(/^\s*(tauri-plugin-[\w-]+)\s*=/gm)].map((match) => match[1]);
+  assert.deepEqual(
+    rustPlugins,
+    ['tauri-plugin-single-instance'],
+    '新增 Rust 插件前先评审权限与攻击面，并更新本断言',
+  );
+});
+
+test('单窗口模式：事件名与 Rust / src/api.ts 一致', () => {
+  const rust = read('src-tauri/src/single_instance.rs');
+  const api = read('src/api.ts');
+  const eventName = rust.match(/OPEN_DOCUMENTS_EVENT: &str = "([^"]+)"/)?.[1];
+  assert.ok(eventName, 'single_instance.rs 必须定义 OPEN_DOCUMENTS_EVENT');
+  assert.ok(api.includes(`'${eventName}'`), `src/api.ts 必须监听事件 ${eventName}`);
 });

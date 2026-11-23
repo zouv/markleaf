@@ -29,6 +29,18 @@ pub fn app_info(app: tauri::AppHandle) -> AppInfo {
     }
 }
 
+/// 持久化「单窗口模式」到应用配置目录，供之后启动的第二实例在插件回调中同步读取。
+#[tauri::command]
+pub fn set_single_window_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    crate::preferences::set_single_window_mode(&app, enabled)
+}
+
+/// 取出第二实例转发、尚未打开的文档路径（前端启动完成后的竞态兜底）。
+#[tauri::command]
+pub fn take_pending_open_documents() -> Vec<String> {
+    crate::single_instance::take_pending_open_documents()
+}
+
 /// 启动时检查命令行参数是否有双击传入的 `.md` 文件，若有则一次性解析返回首屏数据。
 #[tauri::command]
 pub fn startup_document() -> Result<Option<DocumentSession>, String> {

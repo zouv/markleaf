@@ -29,7 +29,7 @@ const CATEGORIES: ReadonlyArray<{ id: CategoryId; label: string; desc: string }>
   { id: 'appearance', label: '外观与主题', desc: '配色方案、亮暗跟随与界面缩放' },
   { id: 'rendering', label: '排版与阅读区', desc: '行宽模式、正文字体、字号与代码块样式' },
   { id: 'editor', label: '编辑器与辅助', desc: '行号水槽、自动配对、打字机与专注模式' },
-  { id: 'files', label: '文件与大纲', desc: '自动保存、换行符规范与侧栏大纲行为' },
+  { id: 'files', label: '文件与大纲', desc: '窗口模式、自动保存、换行符规范与侧栏大纲行为' },
   { id: 'shortcuts', label: '快捷键速查', desc: '全局键盘快捷键一览' },
 ];
 
@@ -543,6 +543,27 @@ export default function SettingsDialog({
 
             {category === 'files' && (
               <>
+                <div className="ml-settings-section">
+                  <h4>窗口与多实例 (Window &amp; Instance)</h4>
+                  <label className="ml-setting-row">
+                    <div>
+                      <div className="ml-setting-label">单窗口模式 (Single Window Mode)</div>
+                      <div className="ml-settings-note">
+                        开启后，在资源管理器双击 .md 会合并到已打开的 MarkLeaf 窗口中新开页签；
+                        关闭时每次双击都会启动独立窗口。默认关闭。
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={draft.singleWindowMode}
+                      onChange={(e) => update('singleWindowMode', e.target.checked)}
+                    />
+                  </label>
+                  <p className="ml-settings-note">
+                    开启 / 关闭对之后双击打开的文件立即生效，无需重启应用。
+                  </p>
+                </div>
+
                 <div className="ml-settings-section">
                   <h4>文件打开与保存策略</h4>
                   <div className="ml-setting-row">

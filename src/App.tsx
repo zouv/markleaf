@@ -2,12 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getAppInfo,
   getStartupDocument,
+  isTauriRuntime,
+  onOpenDocumentsRequested,
   openMarkdownFile,
   openFileDirectory,
   pickMarkdownFile,
   renderMarkdown,
   saveMarkdownDialog,
   saveMarkdownFile,
+  setSingleWindowMode,
+  takePendingOpenDocuments,
   toggleMarkdownTask,
   type DocStats,
   type DocumentSession,
@@ -85,7 +89,7 @@ export function App() {
       ? window.matchMedia('(prefers-color-scheme: dark)').matches
       : false,
   );
-  const [appVersion, setAppVersion] = useState<string>('0.3.0');
+  const [appVersion, setAppVersion] = useState<string>('0.4.0');
 
   // 视图与面板状态
   const [viewMode, setViewMode] = useState<ViewMode>(() => loadSettings().defaultViewMode);
@@ -132,6 +136,9 @@ export function App() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const lastPageWidthRef = useRef<PageWidthMode>('comfortable');
+  const openPathInTabRef = useRef<(path: string) => Promise<void>>(async () => {});
+  const drainPendingRef = useRef<() => Promise<void>>(async () => {});
+  const bootstrapDoneRef = useRef(false);
 
   const activeTab = useMemo(
     () => tabs.find((t) => t.id === activeTabId) ?? tabs[0],
@@ -185,6 +192,13 @@ export function App() {
     setSettings(next);
     saveSettings(next);
   }, []);
+
+  // 单窗口模式需要 Rust 在第二实例启动时读取，故每次变化都镜像到应用配置目录
+  useEffect(() => {
+    void setSingleWindowMode(settings.singleWindowMode).catch(() => {
+      showToast('单窗口模式设置未能写入本地配置');
+    });
+  }, [settings.singleWindowMode, showToast]);
 
   const updateTabById = useCallback((tabId: string, updater: (prev: DocTabState) => DocTabState) => {
     setTabs((prev) => prev.map((t) => (t.id === tabId ? updater(t) : t)));
@@ -242,7 +256,16 @@ export function App() {
         }));
       }
     }
-    void bootstrap();
+    void bootstrap()
+      .catch(() => {
+        // 首屏渲染失败时保持欢迎页
+      })
+      .finally(() => {
+        if (!cancelled) {
+          bootstrapDoneRef.current = true;
+          void drainPendingRef.current();
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -508,6 +531,54 @@ export function App() {
     },
     [tabs, sessionToTabState, showToast],
   );
+
+  useEffect(() => {
+    openPathInTabRef.current = openPathInTab;
+  }, [openPathInTab]);
+
+  // 排空第二个实例转发的文档路径；首屏启动完成前先留在 Rust 队列里，避免被欢迎页覆盖
+  const drainPendingOpenDocuments = useCallback(async () => {
+    if (!bootstrapDoneRef.current) return;
+    let paths: string[] = [];
+    try {
+      paths = await takePendingOpenDocuments();
+    } catch {
+      return;
+    }
+    for (const path of paths) {
+      await openPathInTabRef.current(path);
+    }
+  }, []);
+
+  useEffect(() => {
+    drainPendingRef.current = drainPendingOpenDocuments;
+  }, [drainPendingOpenDocuments]);
+
+  // 订阅第二实例转发事件：事件只负责唤醒，实际路径从 Rust 队列取出
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void onOpenDocumentsRequested(() => {
+      void drainPendingRef.current();
+    })
+      .then((stop) => {
+        if (disposed) {
+          stop();
+          return;
+        }
+        unlisten = stop;
+        // 补齐「事件已发出但监听尚未注册」的窗口期
+        void drainPendingRef.current();
+      })
+      .catch(() => {
+        // 订阅失败不影响手动打开文档
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   const handlePickFile = useCallback(async () => {
     try {

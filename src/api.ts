@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export type AppInfo = {
   name: string;
@@ -60,7 +61,7 @@ export function isTauriRuntime(): boolean {
 
 export function getAppInfo(): Promise<AppInfo> {
   if (!isTauriRuntime()) {
-    return Promise.resolve({ name: 'MarkLeaf (Web Preview)', version: '0.3.0' });
+    return Promise.resolve({ name: 'MarkLeaf (Web Preview)', version: '0.4.0' });
   }
   return invoke<AppInfo>('app_info');
 }
@@ -70,6 +71,32 @@ export function getStartupDocument(): Promise<DocumentSession | null> {
     return Promise.resolve(null);
   }
   return invoke<DocumentSession | null>('startup_document');
+}
+
+/** 把「单窗口模式」镜像到 Rust 配置目录，供之后启动的第二实例在插件回调中读取。 */
+export function setSingleWindowMode(enabled: boolean): Promise<void> {
+  if (!isTauriRuntime()) {
+    return Promise.resolve();
+  }
+  return invoke<void>('set_single_window_mode', { enabled });
+}
+
+/** 取出第二实例已转发、尚未打开的文档路径（Rust 侧入队，避免启动竞态丢文档）。 */
+export function takePendingOpenDocuments(): Promise<string[]> {
+  if (!isTauriRuntime()) {
+    return Promise.resolve([]);
+  }
+  return invoke<string[]>('take_pending_open_documents');
+}
+
+/** 订阅「第二个实例转发了文档」事件；事件名与 Rust `single_instance.rs` 保持一致。 */
+export function onOpenDocumentsRequested(handler: () => void): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(() => {});
+  }
+  return listen('markleaf-open-documents', () => {
+    handler();
+  });
 }
 
 export function openMarkdownFile(path: string): Promise<DocumentSession> {

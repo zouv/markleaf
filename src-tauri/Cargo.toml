@@ -1,6 +1,6 @@
 [package]
 name = "markleaf"
-version = "0.3.0"  # 版本号唯一出处；tauri.conf.json 省略 version 会回退到这里
+version = "0.4.0"  # 版本号唯一出处；tauri.conf.json 省略 version 会回退到这里
 description = "Fast, beautiful and convenient desktop Markdown reader and editor"
 edition = "2021"
 publish = false
@@ -23,6 +23,9 @@ serde_json = "1"
 comrak = { version = "0.39", default-features = false }
 encoding_rs = "0.8"
 rfd = "0.15"
+# 单窗口模式：第二个实例把双击的 .md 参数转发给已运行实例后自行退出。
+# 未开启单窗口时由回调重新拉起独立进程，保持原有的多开行为。
+tauri-plugin-single-instance = "2"
 
 # 原生边框双击：Tauri 的无边框 resize 子窗口会吞掉最外层边框鼠标事件，
 # 需要在 Windows 上对子窗口做一次最小 Win32 子类化（隔离在 window_edges.rs）。
